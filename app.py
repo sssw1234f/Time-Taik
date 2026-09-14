@@ -84,7 +84,7 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("assistant"):
         
         # 실제 답변 생성
-        response_text = get_persona_answer(char_name, prompt, char_data)
+        # response_text = get_persona_answer(char_name, prompt, char_data)
         
         full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
         st.markdown(full_response)
