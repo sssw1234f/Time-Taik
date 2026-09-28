@@ -70,9 +70,11 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-# RAG생성
 def get_persona_answer(char_name, user_question, char_data):
-    api_key = st.secrets["OPENAI_API_KEY"]
+    try:
+        api_key = st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        return f"[{char_name}의 답변] : OpenAI API 키가 설정되지 않았습니다. Streamlit 대시보드의 Settings > Secrets에 OPENAI_API_KEY를 등록해주세요."
     client = OpenAI(api_key=api_key)
     
     # 1. 시스템 설정 (인물의 페르소나 주입)
