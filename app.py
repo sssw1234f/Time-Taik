@@ -58,6 +58,7 @@ if st.sidebar.button("교사용 수업 활동지 생성하기"):
         mime="text/markdown",
     )
 
+
 # 메인 UI 출력
 col1, col2 = st.columns([1, 2])
 with col1:
@@ -110,7 +111,7 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("assistant"):
         
         # 실제 답변 생성
-        # response_text = get_persona_answer(char_name, prompt, char_data)
+        response_text = get_persona_answer(char_name, prompt, char_data)
         
         full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
         st.markdown(full_response)
