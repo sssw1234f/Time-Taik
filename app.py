@@ -43,6 +43,14 @@ st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI �
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
 
+# 페르소나 변경 시 이전 대화 내용 자동 초기화
+if "current_char" not in st.session_state:
+    st.session_state.current_char = char_name
+
+if st.session_state.current_char != char_name:
+    st.session_state.messages = []
+    st.session_state.current_char = char_name
+
 # -------- Teacher worksheet generation ----------
 st.sidebar.markdown("---")
 if st.sidebar.button("교사용 수업 활동지 생성하기"):
@@ -68,6 +76,11 @@ if st.sidebar.button("교사용 수업 활동지 생성하기"):
         file_name=f"{char_name}_worksheet.md",
         mime="text/markdown",
     )
+
+st.sidebar.markdown("---")
+if st.sidebar.button("🧹 대화 내용 초기화"):
+    st.session_state.messages = []
+    st.rerun()
 
 # 메인 UI 출력
 col1, col2 = st.columns([1, 2])
