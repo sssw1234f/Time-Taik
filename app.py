@@ -34,68 +34,14 @@ def get_gemini_api_key():
             pass
     return api_key
 
-# [사용 가능한 제미나이 모델 목록 조회 헬퍼]
-@st.cache_data(show_spinner=False, ttl=600)
-def fetch_available_models(api_key):
-    try:
-        genai.configure(api_key=api_key)
-        models = []
-        for m in genai.list_models():
-            if "generateContent" in m.supported_generation_methods:
-                clean_name = m.name.replace("models/", "")
-                models.append(clean_name)
-        return models, None
-    except Exception as e:
-        return [], str(e)
-
 # [2. UI 설정]
 st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
 st.title("📜 타임톡(Time-Talk)")
 st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI 페르소나 챗봇")
 
-# 사이드바 인물 선택
+# 사이드바 인물 선택 (불필요한 모델 선택 UI 완전 제거)
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
-
-# 사이드바 AI 모델 선택 (API 키에서 지원되는 모델 자동 감지)
-api_key = get_gemini_api_key()
-selected_model = None
-
-if api_key:
-    available_models, err = fetch_available_models(api_key)
-    if available_models:
-        # 우선순위: Google 권장 최신 gemini-3.8-flash 우선
-        preferred = [
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-flash-latest",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-pro-latest"
-        ]
-        default_index = 0
-        for p in preferred:
-            if p in available_models:
-                default_index = available_models.index(p)
-                break
-        else:
-            flash_idx = [i for i, m in enumerate(available_models) if "flash" in m.lower()]
-            if flash_idx:
-                default_index = flash_idx[0]
-
-        selected_model = st.sidebar.selectbox(
-            "🤖 AI 모델 선택:",
-            available_models,
-            index=default_index,
-            help="사용자의 API 키에서 지원하는 모델 목록입니다."
-        )
-    else:
-        st.sidebar.caption("⚠️ 지원 모델 목록을 조회 중이거나 권한을 확인해주세요.")
-else:
-    st.sidebar.warning("⚠️ API 키가 설정되지 않았습니다.")
 
 # -------- Teacher worksheet generation ----------
 st.sidebar.markdown("---")
@@ -123,19 +69,19 @@ if st.sidebar.button("교사용 수업 활동지 생성하기"):
         mime="text/markdown",
     )
 
-
 # 메인 UI 출력
 col1, col2 = st.columns([1, 2])
 with col1:
     try:
         st.image(char_data["img"], use_container_width=True)
-    except:
+    except Exception:
         st.warning("이미지 파일을 확인하세요.")
 with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-def get_persona_answer(char_name, user_question, char_data, model_name=None):
+# RAG & 제미나이 답변 생성 함수 (gemini-3.8-flash 단일 모델 고정)
+def get_persona_answer(char_name, user_question, char_data):
     current_key = get_gemini_api_key()
     if not current_key:
         return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 환경변수 또는 Streamlit Secrets에 GEMINI_API_KEY(또는 GOOGLE_API_KEY)를 등록해주세요."
@@ -143,52 +89,57 @@ def get_persona_answer(char_name, user_question, char_data, model_name=None):
     try:
         genai.configure(api_key=current_key)
         
-        # 1. 사용할 모델 결정 (사이드바 선택 모델 -> 자동 탐색 모델 fallback)
-        target_model = model_name
-        if not target_model:
-            models, _ = fetch_available_models(current_key)
-            if models:
-                target_model = models[0]
-            else:
-                target_model = "gemini-3.8-flash"
-        
-        # 2. 시스템 설정 (인물의 페르소나 및 사실 데이터 주입)
+        # 시스템 프롬프트 (인물의 페르소나 및 사실 데이터 주입)
         system_instruction = (
             f"당신은 {char_name}입니다. {char_data['persona']}\n"
             f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
             f"답변 시 출처 정보를 하단에 반드시 제공하세요."
         )
         
-        model = genai.GenerativeModel(
-            model_name=target_model,
-            system_instruction=system_instruction
-        )
-        
-        # 3. 질문에 대한 답변 생성
-        response = model.generate_content(user_question)
-        return response.text
+        # 사용자가 사용하는 모델: gemini-3.8-flash 고정
+        try:
+            model = genai.GenerativeModel(
+                model_name="gemini-3.8-flash",
+                system_instruction=system_instruction
+            )
+            response = model.generate_content(user_question)
+        except Exception:
+            model = genai.GenerativeModel(
+                model_name="models/gemini-3.8-flash",
+                system_instruction=system_instruction
+            )
+            response = model.generate_content(user_question)
+
+        if hasattr(response, "text") and response.text:
+            return response.text
+        elif response.candidates and response.candidates[0].content.parts:
+            return response.candidates[0].content.parts[0].text
+        else:
+            return f"[{char_name}의 답변] : 죄송합니다. 답변을 생성하지 못했습니다."
     except Exception as e:
-        models, _ = fetch_available_models(current_key)
-        models_str = ", ".join(models) if models else "조회 불가"
-        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}\n\n💡 현재 API 키에서 사용 가능한 모델 목록: [{models_str}]"
+        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}"
         
 # [3. 대화 로직 및 RAG 기능]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# 대화 기록 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# 질문 입력 및 응답 생성
 if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
+    # 1. 사용자 질문 추가
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 답변 생성
+    # 2. 어시스턴트 답변 생성 (스피너로 응답 대기 표시)
     with st.chat_message("assistant"):
-        response_text = get_persona_answer(char_name, prompt, char_data, model_name=selected_model)
-        full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
-        st.markdown(full_response)
+        with st.spinner(f"{char_name} 님이 답변을 작성하고 있습니다..."):
+            response_text = get_persona_answer(char_name, prompt, char_data)
+            full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
+            st.markdown(full_response)
         
     st.session_state.messages.append({"role": "assistant", "content": full_response})
