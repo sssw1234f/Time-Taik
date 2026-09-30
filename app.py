@@ -1,5 +1,6 @@
 import streamlit as st
-from openai import OpenAI
+import os
+import google.generativeai as genai
 
 # [1. 데이터베이스] - 공공데이터를 딕셔너리로 구조화
 knowledge_base = {
@@ -71,30 +72,37 @@ with col2:
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
 def get_persona_answer(char_name, user_question, char_data):
+    # 환경변수 또는 st.secrets에서 키 가져오기 (GEMINI_API_KEY 또는 GOOGLE_API_KEY)
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            pass
+
+    if not api_key:
+        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 환경변수 또는 Streamlit Secrets에 GEMINI_API_KEY(또는 GOOGLE_API_KEY)를 등록해주세요."
+
     try:
-        api_key = st.secrets["OPENAI_API_KEY"]
-    except Exception:
-        return f"[{char_name}의 답변] : OpenAI API 키가 설정되지 않았습니다. Streamlit 대시보드의 Settings > Secrets에 OPENAI_API_KEY를 등록해주세요."
-    client = OpenAI(api_key=api_key)
-    
-    # 1. 시스템 설정 (인물의 페르소나 주입)
-    system_prompt = f"당신은 {char_name}입니다. {char_data['persona']}"
-    
-    # 2. 지식 주입 (우리가 가진 사실 데이터)
-    context = f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}"
-    
-    # 3. LLM에게 질문 (OpenAI API 호출 예시)
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": f"{system_prompt}\n{context}\n답변 시 출처 정보를 하단에 반드시 제공하세요."},
-                {"role": "user", "content": user_question}
-            ]
+        genai.configure(api_key=api_key)
+        
+        # 1. 시스템 설정 (인물의 페르소나 및 사실 데이터 주입)
+        system_instruction = (
+            f"당신은 {char_name}입니다. {char_data['persona']}\n"
+            f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
+            f"답변 시 출처 정보를 하단에 반드시 제공하세요."
         )
-        return response.choices[0].message.content
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction=system_instruction
+        )
+        
+        # 2. 질문에 대한 답변 생성
+        response = model.generate_content(user_question)
+        return response.text
     except Exception as e:
-        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다.: {str(e)}"
+        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}"
         
 # [3. 대화 로직 및 RAG 기능]
 if "messages" not in st.session_state:
