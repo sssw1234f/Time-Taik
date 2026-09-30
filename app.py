@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import requests
+import xml.etree.ElementTree as ET
 import google.generativeai as genai
 
 # [1. 데이터베이스] - 공공데이터를 딕셔너리로 구조화
@@ -24,7 +26,7 @@ knowledge_base = {
     }
 }
 
-# [API 키 취득 헬퍼]
+# [API 키 취득 헬퍼 - Gemini]
 def get_gemini_api_key():
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -34,12 +36,97 @@ def get_gemini_api_key():
             pass
     return api_key
 
+# [공공데이터포털 오픈API 설정 및 키 취득 헬퍼]
+PUBLIC_DATA_API_BASE = "https://apis.data.go.kr/1371027/openapi"
+# 일반 인증키 (Decoding) - 기본값으로 설정되어 즉시 테스트 가능
+DEFAULT_PUBLIC_DATA_API_KEY = "4270cc3fcd12b107d64f42f4e779841f9fd086b9a6155911c29b0b800c7afbad"
+PUBLIC_DATA_OPERATION = ""  # 필요 시 세부 오퍼레이션 엔드포인트 명칭 지정 (예: "/service/getHistoryArchiveList")
+
+def get_public_data_api_key():
+    key = os.getenv("PUBLIC_DATA_API_KEY")
+    if not key and hasattr(st, "secrets"):
+        try:
+            key = st.secrets.get("PUBLIC_DATA_API_KEY")
+        except Exception:
+            pass
+    return key or DEFAULT_PUBLIC_DATA_API_KEY
+
+def fetch_history_image_from_public_api(keyword: str, fallback_img: str = None):
+    """
+    공공데이터포털 오픈API(XML)를 호출하여 키워드 관련 역사적 이미지 URL과 메타데이터를 파싱합니다.
+    실패하거나 자료가 없을 경우 안전하게 fallback_img(또는 None)를 반환합니다.
+    """
+    api_key = get_public_data_api_key()
+    if not api_key:
+        return None
+
+    url = f"{PUBLIC_DATA_API_BASE}{PUBLIC_DATA_OPERATION}"
+    params = {
+        "serviceKey": api_key,
+        "keyword": keyword,
+        "pageNo": "1",
+        "numOfRows": "5"
+    }
+
+    try:
+        # 공공 API 호출 (타임아웃 3초로 앱 멈춤 방지)
+        resp = requests.get(url, params=params, timeout=3.0)
+        if resp.status_code == 200 and resp.text:
+            root = ET.fromstring(resp.text)
+            items = root.findall(".//item")
+            target_elements = items if items else [root]
+
+            for elem in target_elements:
+                image_url = None
+                title = None
+                description = None
+
+                for child in elem.iter():
+                    tag_lower = child.tag.lower()
+                    text = (child.text or "").strip()
+
+                    # 이미지 URL 탐색
+                    if not image_url and any(k in tag_lower for k in ["image", "img", "thumb", "file", "url"]):
+                        if text.startswith("http://") or text.startswith("https://"):
+                            image_url = text
+
+                    # 제목 탐색
+                    if not title and any(k in tag_lower for k in ["title", "name", "subject"]):
+                        if text:
+                            title = text
+
+                    # 설명 탐색
+                    if not description and any(k in tag_lower for k in ["desc", "content", "summary"]):
+                        if text:
+                            description = text
+
+                if image_url:
+                    return {
+                        "url": image_url,
+                        "title": title or f"{keyword} 관련 역사 기록물",
+                        "description": description or "공공데이터포털 근현대사 아카이브 제공 자료",
+                        "source": "공공데이터포털 오픈API"
+                    }
+    except Exception:
+        # 공공 API 오류 발생 시에도 서비스 중단 없이 안전하게 통과
+        pass
+
+    # Fallback: 로컬 아카이브 데이터베이스에 보관된 역사 자료 이미지
+    if fallback_img:
+        return {
+            "url": fallback_img,
+            "title": f"{keyword} 역사 아카이브 자료",
+            "description": "대한민국역사박물관 오픈아카이브 소장 자료",
+            "source": "로컬 아카이브 데이터베이스"
+        }
+    return None
+
 # [2. UI 설정]
 st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
 st.title("📜 타임톡(Time-Talk)")
 st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI 페르소나 챗봇")
 
-# 사이드바 인물 선택 (불필요한 모델 선택 UI 완전 제거)
+# 사이드바 인물 선택
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
 
@@ -133,7 +220,6 @@ def get_persona_answer(char_name, user_question, char_data):
                     return response.candidates[0].content.parts[0].text
             except Exception as e:
                 last_error = str(e)
-                # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 즉시 자동 시도
                 continue
                 
         # 모든 모델 후보가 소진되었을 때 친절한 안내 메시지 출력
@@ -147,10 +233,19 @@ def get_persona_answer(char_name, user_question, char_data):
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 대화 기록 출력
+# 대화 기록 출력 (기존 대화의 역사 이미지도 유지)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message.get("image_data"):
+            img_info = message["image_data"]
+            st.image(
+                img_info["url"],
+                caption=f"🏛️ {img_info.get('title', '역사 시각 자료')} ({img_info.get('source', '오픈아카이브')})",
+                use_container_width=True
+            )
+            if img_info.get("description"):
+                st.caption(img_info["description"])
 
 # 질문 입력 및 응답 생성
 if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
@@ -165,5 +260,24 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
             response_text = get_persona_answer(char_name, prompt, char_data)
             full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
             st.markdown(full_response)
+            
+            # 3. 공공데이터포털 오픈API 연동 역사 시각자료 탐색 및 카드 렌더링
+            image_data = fetch_history_image_from_public_api(
+                keyword=char_name,
+                fallback_img=char_data.get("img")
+            )
+            if image_data and image_data.get("url"):
+                st.markdown("---")
+                st.image(
+                    image_data["url"],
+                    caption=f"🏛️ {image_data.get('title', '역사 시각 자료')} ({image_data.get('source', '오픈아카이브')})",
+                    use_container_width=True
+                )
+                if image_data.get("description"):
+                    st.caption(image_data["description"])
         
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": full_response,
+        "image_data": image_data
+    })
