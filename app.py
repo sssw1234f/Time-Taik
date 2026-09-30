@@ -64,8 +64,18 @@ selected_model = None
 if api_key:
     available_models, err = fetch_available_models(api_key)
     if available_models:
-        # 우선순위: gemini-2.5-flash -> gemini-2.0-flash -> flash 포함 모델 -> 첫 번째 모델
-        preferred = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash-latest"]
+        # 우선순위: Google 권장 최신 gemini-3.8-flash 우선
+        preferred = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-flash-latest",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-pro-latest"
+        ]
         default_index = 0
         for p in preferred:
             if p in available_models:
@@ -140,7 +150,7 @@ def get_persona_answer(char_name, user_question, char_data, model_name=None):
             if models:
                 target_model = models[0]
             else:
-                target_model = "gemini-2.0-flash"
+                target_model = "gemini-3.8-flash"
         
         # 2. 시스템 설정 (인물의 페르소나 및 사실 데이터 주입)
         system_instruction = (
