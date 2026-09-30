@@ -80,7 +80,7 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-# RAG & 제미나이 답변 생성 함수 (gemini-3.8-flash 단일 모델 고정)
+# RAG & 제미나이 답변 생성 함수 (쿼터 초과 시 자동 폴백 지원)
 def get_persona_answer(char_name, user_question, char_data):
     current_key = get_gemini_api_key()
     if not current_key:
@@ -96,28 +96,39 @@ def get_persona_answer(char_name, user_question, char_data):
             f"답변 시 출처 정보를 하단에 반드시 제공하세요."
         )
         
-        # 사용자가 사용하는 모델: gemini-3.8-flash 고정
-        try:
-            model = genai.GenerativeModel(
-                model_name="gemini-3.8-flash",
-                system_instruction=system_instruction
-            )
-            response = model.generate_content(user_question)
-        except Exception:
-            model = genai.GenerativeModel(
-                model_name="models/gemini-3.8-flash",
-                system_instruction=system_instruction
-            )
-            response = model.generate_content(user_question)
-
-        if hasattr(response, "text") and response.text:
-            return response.text
-        elif response.candidates and response.candidates[0].content.parts:
-            return response.candidates[0].content.parts[0].text
-        else:
-            return f"[{char_name}의 답변] : 죄송합니다. 답변을 생성하지 못했습니다."
+        # 429 Quota(할당량) 초과 방지를 위한 순차 대체 모델 리스트
+        candidate_models = [
+            "gemini-3.8-flash",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash-lite",
+            "gemini-flash-latest"
+        ]
+        
+        last_error = ""
+        for model_name in candidate_models:
+            try:
+                model = genai.GenerativeModel(
+                    model_name=model_name,
+                    system_instruction=system_instruction
+                )
+                response = model.generate_content(user_question)
+                
+                if hasattr(response, "text") and response.text:
+                    return response.text
+                elif response.candidates and response.candidates[0].content.parts:
+                    return response.candidates[0].content.parts[0].text
+            except Exception as e:
+                last_error = str(e)
+                # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 즉시 자동 시도
+                continue
+                
+        # 모든 모델 후보가 소진되었을 때 친절한 안내 메시지 출력
+        if "429" in last_error or "quota" in last_error.lower():
+            return f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. 약 20~30초 후에 다시 질문을 입력해 주세요."
+        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {last_error}"
     except Exception as e:
-        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}"
+        return f"[{char_name}의 답변] : 시스템 오류가 발생했습니다: {str(e)}"
         
 # [3. 대화 로직 및 RAG 기능]
 if "messages" not in st.session_state:
