@@ -24,6 +24,30 @@ knowledge_base = {
     }
 }
 
+# [API 키 취득 헬퍼]
+def get_gemini_api_key():
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            pass
+    return api_key
+
+# [사용 가능한 제미나이 모델 목록 조회 헬퍼]
+@st.cache_data(show_spinner=False, ttl=600)
+def fetch_available_models(api_key):
+    try:
+        genai.configure(api_key=api_key)
+        models = []
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                clean_name = m.name.replace("models/", "")
+                models.append(clean_name)
+        return models, None
+    except Exception as e:
+        return [], str(e)
+
 # [2. UI 설정]
 st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
 st.title("📜 타임톡(Time-Talk)")
@@ -32,6 +56,36 @@ st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI �
 # 사이드바 인물 선택
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
+
+# 사이드바 AI 모델 선택 (API 키에서 지원되는 모델 자동 감지)
+api_key = get_gemini_api_key()
+selected_model = None
+
+if api_key:
+    available_models, err = fetch_available_models(api_key)
+    if available_models:
+        # 우선순위: gemini-2.5-flash -> gemini-2.0-flash -> flash 포함 모델 -> 첫 번째 모델
+        preferred = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-exp", "gemini-1.5-flash-latest"]
+        default_index = 0
+        for p in preferred:
+            if p in available_models:
+                default_index = available_models.index(p)
+                break
+        else:
+            flash_idx = [i for i, m in enumerate(available_models) if "flash" in m.lower()]
+            if flash_idx:
+                default_index = flash_idx[0]
+
+        selected_model = st.sidebar.selectbox(
+            "🤖 AI 모델 선택:",
+            available_models,
+            index=default_index,
+            help="사용자의 API 키에서 지원하는 모델 목록입니다."
+        )
+    else:
+        st.sidebar.caption("⚠️ 지원 모델 목록을 조회 중이거나 권한을 확인해주세요.")
+else:
+    st.sidebar.warning("⚠️ API 키가 설정되지 않았습니다.")
 
 # -------- Teacher worksheet generation ----------
 st.sidebar.markdown("---")
@@ -71,22 +125,24 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-def get_persona_answer(char_name, user_question, char_data):
-    # 환경변수 또는 st.secrets에서 키 가져오기 (GEMINI_API_KEY 또는 GOOGLE_API_KEY)
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        try:
-            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-        except Exception:
-            pass
-
-    if not api_key:
+def get_persona_answer(char_name, user_question, char_data, model_name=None):
+    current_key = get_gemini_api_key()
+    if not current_key:
         return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 환경변수 또는 Streamlit Secrets에 GEMINI_API_KEY(또는 GOOGLE_API_KEY)를 등록해주세요."
 
     try:
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=current_key)
         
-        # 1. 시스템 설정 (인물의 페르소나 및 사실 데이터 주입)
+        # 1. 사용할 모델 결정 (사이드바 선택 모델 -> 자동 탐색 모델 fallback)
+        target_model = model_name
+        if not target_model:
+            models, _ = fetch_available_models(current_key)
+            if models:
+                target_model = models[0]
+            else:
+                target_model = "gemini-2.0-flash"
+        
+        # 2. 시스템 설정 (인물의 페르소나 및 사실 데이터 주입)
         system_instruction = (
             f"당신은 {char_name}입니다. {char_data['persona']}\n"
             f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
@@ -94,15 +150,17 @@ def get_persona_answer(char_name, user_question, char_data):
         )
         
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name=target_model,
             system_instruction=system_instruction
         )
         
-        # 2. 질문에 대한 답변 생성
+        # 3. 질문에 대한 답변 생성
         response = model.generate_content(user_question)
         return response.text
     except Exception as e:
-        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}"
+        models, _ = fetch_available_models(current_key)
+        models_str = ", ".join(models) if models else "조회 불가"
+        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {str(e)}\n\n💡 현재 API 키에서 사용 가능한 모델 목록: [{models_str}]"
         
 # [3. 대화 로직 및 RAG 기능]
 if "messages" not in st.session_state:
@@ -117,12 +175,9 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 답변 생성 (실제 API 연동 시 OpenAI 호출부)
+    # 답변 생성
     with st.chat_message("assistant"):
-        
-        # 실제 답변 생성
-        response_text = get_persona_answer(char_name, prompt, char_data)
-        
+        response_text = get_persona_answer(char_name, prompt, char_data, model_name=selected_model)
         full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
         st.markdown(full_response)
         
