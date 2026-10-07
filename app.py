@@ -29,7 +29,8 @@ def get_gemini_api_key():
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key:
         try:
-            api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+            if hasattr(st, "secrets"):
+                api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
         except Exception:
             pass
     return api_key
@@ -39,7 +40,7 @@ st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
 st.title("📜 타임톡(Time-Talk)")
 st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI 페르소나 챗봇")
 
-# 사이드바 인물 선택 (불필요한 모델 선택 UI 완전 제거)
+# 사이드바 인물 선택
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
 
@@ -127,10 +128,14 @@ def get_persona_answer(char_name, user_question, char_data):
                 )
                 response = model.generate_content(user_question)
                 
+                text_content = ""
                 if hasattr(response, "text") and response.text:
-                    return response.text
+                    text_content = response.text
                 elif response.candidates and response.candidates[0].content.parts:
-                    return response.candidates[0].content.parts[0].text
+                    text_content = response.candidates[0].content.parts[0].text
+                
+                if text_content and text_content.strip():
+                    return text_content.strip()
             except Exception as e:
                 last_error = str(e)
                 # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 즉시 자동 시도
@@ -159,11 +164,13 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 2. 어시스턴트 답변 생성 (스피너로 응답 대기 표시)
+    # 2. 어시스턴트 답변 생성
     with st.chat_message("assistant"):
         with st.spinner(f"{char_name} 님이 답변을 작성하고 있습니다..."):
             response_text = get_persona_answer(char_name, prompt, char_data)
             full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
-            st.markdown(full_response)
+        
+        # ★ spinner 밖에서 화면에 확실하게 렌더링 (스피너 DOM 언마운트로 인한 텍스트 증발 방지)
+        st.markdown(full_response)
         
     st.session_state.messages.append({"role": "assistant", "content": full_response})
