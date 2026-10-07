@@ -26,23 +26,21 @@ knowledge_base = {
 
 # [API 키 취득 헬퍼]
 def get_gemini_api_key():
-    # 1. 환경변수 탐색
+    # 1. 수동 입력 세션 키 우선
+    if st.session_state.get("user_gemini_key"):
+        return st.session_state["user_gemini_key"].strip()
+
+    # 2. 환경변수 탐색
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if api_key:
-        return api_key
+        return api_key.strip()
 
-    # 2. Streamlit secrets 탐색
+    # 3. Streamlit secrets 탐색
     try:
         if hasattr(st, "secrets"):
-            if "GEMINI_API_KEY" in st.secrets:
-                return st.secrets["GEMINI_API_KEY"]
-            if "GOOGLE_API_KEY" in st.secrets:
-                return st.secrets["GOOGLE_API_KEY"]
-            # 소문자 키 탐색
-            if "gemini_api_key" in st.secrets:
-                return st.secrets["gemini_api_key"]
-            if "google_api_key" in st.secrets:
-                return st.secrets["google_api_key"]
+            for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api_key", "google_api_key"]:
+                if k in st.secrets and st.secrets[k]:
+                    return str(st.secrets[k]).strip()
     except Exception:
         pass
     return None
@@ -52,16 +50,26 @@ st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
 st.title("📜 타임톡(Time-Talk)")
 st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI 페르소나 챗봇")
 
-# 사이드바 인물 선택
+# 사이드바 설정
+st.sidebar.header("⚙️ 대화 설정")
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
 
-# API 키 연결 상태 인디케이터
+# API 키 연결 상태 및 수동 입력 폴백
 current_key = get_gemini_api_key()
 if current_key:
-    st.sidebar.caption("🟢 Gemini API 키 정상 연결됨")
+    st.sidebar.success("🟢 Gemini API 연결됨")
 else:
-    st.sidebar.error("🔴 Gemini API 키 미등록\n(Streamlit Secrets에 GEMINI_API_KEY를 등록해주세요)")
+    st.sidebar.error("🔴 Gemini API 키 미등록")
+    user_key_input = st.sidebar.text_input(
+        "API 키 직접 입력:",
+        type="password",
+        placeholder="AIzaSy...",
+        help="Streamlit Secrets에 등록되지 않은 경우 여기에 바로 입력하세요."
+    )
+    if user_key_input:
+        st.session_state["user_gemini_key"] = user_key_input
+        st.rerun()
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
 if "current_char" not in st.session_state:
@@ -73,7 +81,7 @@ if st.session_state.current_char != char_name:
 
 # -------- Teacher worksheet generation ----------
 st.sidebar.markdown("---")
-if st.sidebar.button("교사용 수업 활동지 생성하기"):
+if st.sidebar.button("📝 교사용 활동지 생성"):
     msgs = st.session_state.get("messages", [])
     def generate_worksheet(msgs, char_name, char_data):
         md = f"# {char_name} 학습 활동지\n\n"
@@ -83,8 +91,7 @@ if st.sidebar.button("교사용 수업 활동지 생성하기"):
         md += f"- 고등학생: {char_name}의 사상을 현대에 어떻게 적용할 수 있나요?\n\n"
         md += "## Ⅱ. 빈칸 채우기 퀴즈\n"
         md += f"1. {char_name}은 ___년 ___월 ___일에 ___에서 활동을 시작했다.\n"
-        md += f"2. {char_name}이 남긴 주요 업적은 ___이다.\n"
-        md += f"3. {char_name}이 사용하는 말투는 \"{char_data['persona']}\"이다.\n\n"
+        md += f"2. {char_name}이 남긴 주요 업적은 ___이다.\n\n"
         md += f"### 참고 자료\n- 출처: [{char_data['url']}]({char_data['url']})\n"
         return md
     worksheet_md = generate_worksheet(msgs, char_name, char_data)
@@ -98,7 +105,7 @@ if st.sidebar.button("교사용 수업 활동지 생성하기"):
     )
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🧹 대화 내용 초기화"):
+if st.sidebar.button("🧹 대화 내용 초기화", use_container_width=True):
     st.session_state.messages = []
     st.rerun()
 
@@ -113,28 +120,26 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-# RAG & 제미나이 답변 생성 함수 (쿼터 초과 시 자동 폴백 지원)
+# RAG & 제미나이 답변 생성 함수
 def get_persona_answer(char_name, user_question, char_data):
     api_key = get_gemini_api_key()
     if not api_key:
-        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. Streamlit Cloud Settings > Secrets에 GEMINI_API_KEY를 등록해주세요."
+        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 직접 입력하거나 Streamlit Secrets에 등록해주세요."
 
     try:
         genai.configure(api_key=api_key)
         
-        # 시스템 프롬프트 (인물의 페르소나 및 사실 데이터 주입)
         system_instruction = (
             f"당신은 {char_name}입니다. {char_data['persona']}\n"
             f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
-            f"답변 시 출처 정보를 하단에 반드시 제공하세요."
+            f"답변 시 역사적 사실에 기반하여 성실히 답하세요."
         )
         
-        # 가용성 높은 최신 Gemini 모델 우선 탐색 순서
+        # 신속하고 안정적인 실 서비스 모델 리스트
         candidate_models = [
-            "gemini-3.8-flash",
             "gemini-2.5-flash",
             "gemini-1.5-flash",
-            "gemini-3.5-flash",
+            "gemini-3.8-flash",
             "gemini-flash-latest"
         ]
         
@@ -157,39 +162,38 @@ def get_persona_answer(char_name, user_question, char_data):
                     return text_content.strip()
             except Exception as e:
                 last_error = str(e)
-                # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 자동 시도
                 continue
                 
-        # 모든 모델 후보가 소진되었을 때 친절한 안내 메시지 출력
         if "429" in last_error or "quota" in last_error.lower():
             return f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. 약 20~30초 후에 다시 질문을 입력해 주세요."
-        return f"[{char_name}의 답변] : API 연결 오류가 발생했습니다: {last_error}"
+        return f"[{char_name}의 답변] : API 오류 발생: {last_error}"
     except Exception as e:
-        return f"[{char_name}의 답변] : 시스템 오류가 발생했습니다: {str(e)}"
-        
-# [3. 대화 로직 및 RAG 기능]
+        return f"[{char_name}의 답변] : 시스템 오류: {str(e)}"
+
+# [3. 대화 세션 및 렌더링 (Streamlit 표준 placeholder 패턴)]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 대화 기록 출력
+# 기존 대화 기록 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # 질문 입력 및 응답 생성
 if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
-    # 1. 사용자 질문 추가
+    # 1. 사용자 질문 렌더링 & 세션 저장
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 2. 어시스턴트 답변 생성
+    # 2. 어시스턴트 메시지 (placeholder 활용으로 확실한 렌더링 보장)
     with st.chat_message("assistant"):
+        message_placeholder = st.empty()
         with st.spinner(f"{char_name} 님이 답변을 작성하고 있습니다..."):
             response_text = get_persona_answer(char_name, prompt, char_data)
-            full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
+            full_response = f"{response_text}\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
         
-        # spinner 종료 후 화면에 직접 렌더링
-        st.markdown(full_response)
+        # placeholder에 최종 텍스트 주입 (증발 방지)
+        message_placeholder.markdown(full_response)
         
     st.session_state.messages.append({"role": "assistant", "content": full_response})
