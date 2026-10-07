@@ -26,14 +26,26 @@ knowledge_base = {
 
 # [API 키 취득 헬퍼]
 def get_gemini_api_key():
+    # 1. 환경변수 탐색
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        try:
-            if hasattr(st, "secrets"):
-                api_key = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-        except Exception:
-            pass
-    return api_key
+    if api_key:
+        return api_key
+
+    # 2. Streamlit secrets 탐색
+    try:
+        if hasattr(st, "secrets"):
+            if "GEMINI_API_KEY" in st.secrets:
+                return st.secrets["GEMINI_API_KEY"]
+            if "GOOGLE_API_KEY" in st.secrets:
+                return st.secrets["GOOGLE_API_KEY"]
+            # 소문자 키 탐색
+            if "gemini_api_key" in st.secrets:
+                return st.secrets["gemini_api_key"]
+            if "google_api_key" in st.secrets:
+                return st.secrets["google_api_key"]
+    except Exception:
+        pass
+    return None
 
 # [2. UI 설정]
 st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
@@ -43,6 +55,13 @@ st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI �
 # 사이드바 인물 선택
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
+
+# API 키 연결 상태 인디케이터
+current_key = get_gemini_api_key()
+if current_key:
+    st.sidebar.caption("🟢 Gemini API 키 정상 연결됨")
+else:
+    st.sidebar.error("🔴 Gemini API 키 미등록\n(Streamlit Secrets에 GEMINI_API_KEY를 등록해주세요)")
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
 if "current_char" not in st.session_state:
@@ -96,12 +115,12 @@ with col2:
 
 # RAG & 제미나이 답변 생성 함수 (쿼터 초과 시 자동 폴백 지원)
 def get_persona_answer(char_name, user_question, char_data):
-    current_key = get_gemini_api_key()
-    if not current_key:
-        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 환경변수 또는 Streamlit Secrets에 GEMINI_API_KEY(또는 GOOGLE_API_KEY)를 등록해주세요."
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. Streamlit Cloud Settings > Secrets에 GEMINI_API_KEY를 등록해주세요."
 
     try:
-        genai.configure(api_key=current_key)
+        genai.configure(api_key=api_key)
         
         # 시스템 프롬프트 (인물의 페르소나 및 사실 데이터 주입)
         system_instruction = (
@@ -110,12 +129,12 @@ def get_persona_answer(char_name, user_question, char_data):
             f"답변 시 출처 정보를 하단에 반드시 제공하세요."
         )
         
-        # 429 Quota(할당량) 초과 방지를 위한 순차 대체 모델 리스트
+        # 가용성 높은 최신 Gemini 모델 우선 탐색 순서
         candidate_models = [
             "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-1.5-flash",
             "gemini-3.5-flash",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash-lite",
             "gemini-flash-latest"
         ]
         
@@ -138,7 +157,7 @@ def get_persona_answer(char_name, user_question, char_data):
                     return text_content.strip()
             except Exception as e:
                 last_error = str(e)
-                # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 즉시 자동 시도
+                # 429(할당량 초과) 또는 404 발생 시 다음 가용 모델로 자동 시도
                 continue
                 
         # 모든 모델 후보가 소진되었을 때 친절한 안내 메시지 출력
@@ -170,7 +189,7 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
             response_text = get_persona_answer(char_name, prompt, char_data)
             full_response = response_text + f"\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
         
-        # ★ spinner 밖에서 화면에 확실하게 렌더링 (스피너 DOM 언마운트로 인한 텍스트 증발 방지)
+        # spinner 종료 후 화면에 직접 렌더링
         st.markdown(full_response)
         
     st.session_state.messages.append({"role": "assistant", "content": full_response})
