@@ -1,5 +1,9 @@
 import streamlit as st
 import os
+import urllib.request
+import urllib.parse
+import json
+import re
 import google.generativeai as genai
 
 # [1. 데이터베이스] - 공공데이터를 딕셔너리로 구조화
@@ -120,7 +124,100 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-# RAG & 제미나이 답변 생성 함수
+# [3. 위키미디어(Wikimedia) REST API 연동 함수]
+WIKI_HEADERS = {
+    "User-Agent": "TimeTalkBot/1.0 (Educational Project; mailto:history@timetalk.org)"
+}
+
+def search_wikimedia_image(query):
+    """
+    위키미디어 / 위키백과 REST API를 통해 검색어에 맞는 공식 역사 사료 이미지 검색
+    """
+    if not query:
+        return None
+    encoded = urllib.parse.quote(query.strip())
+    
+    # 1. 한국어 위키백과 검색 REST API
+    wiki_url = f"https://ko.wikipedia.org/w/rest.php/v1/search/page?q={encoded}&limit=3"
+    try:
+        req = urllib.request.Request(wiki_url, headers=WIKI_HEADERS)
+        with urllib.request.urlopen(req, timeout=4) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            for page in data.get("pages", []):
+                thumb = page.get("thumbnail")
+                if thumb and thumb.get("url"):
+                    raw_url = thumb["url"]
+                    if raw_url.startswith("//"):
+                        raw_url = "https:" + raw_url
+                    # 고화질(500px) 썸네일로 변환
+                    hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
+                    page_title = page.get("title", "")
+                    return {
+                        "title": page_title,
+                        "description": page.get("description", "") or "위키백과 역사 사료",
+                        "image_url": hd_url,
+                        "page_url": f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(page_title)}"
+                    }
+    except Exception:
+        pass
+
+    # 2. 위키미디어 커먼즈(Commons) REST API 폴백
+    try:
+        commons_url = f"https://commons.wikimedia.org/w/rest.php/v1/search/page?q={encoded}&limit=3"
+        req = urllib.request.Request(commons_url, headers=WIKI_HEADERS)
+        with urllib.request.urlopen(req, timeout=4) as res:
+            data = json.loads(res.read().decode("utf-8"))
+            for page in data.get("pages", []):
+                thumb = page.get("thumbnail")
+                if thumb and thumb.get("url"):
+                    raw_url = thumb["url"]
+                    if raw_url.startswith("//"):
+                        raw_url = "https:" + raw_url
+                    hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
+                    clean_title = page.get("title", "").replace("File:", "").replace("_", " ")
+                    return {
+                        "title": clean_title,
+                        "description": "Wikimedia Commons 공식 사료",
+                        "image_url": hd_url,
+                        "page_url": f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(page.get('title', ''))}"
+                    }
+    except Exception:
+        pass
+
+    return None
+
+def get_relevant_history_image(char_name, user_question, response_text=""):
+    """
+    질문과 답변 맥락에 맞춰 위키미디어 REST API에서 가장 적합한 역사 사진을 검색
+    """
+    context = f"{user_question} {response_text}"
+    
+    # 주요 역사 사건/장소 우선 검색 키워드
+    priority_keywords = [
+        "하얼빈 의거", "하얼빈", "이토 히로부미", "뤼순 감옥", "동양평화론", "단지동맹",
+        "3·1 운동", "3.1 운동", "아우내 장터", "만세 운동", "서대문형무소", "이화학당",
+        "훙커우 공원 사건", "훙커우 공원", "홍커우 공원", "도시락 폭탄", "물통 폭탄", "한인애국단", "상하이 의거"
+    ]
+    
+    for kw in priority_keywords:
+        if kw in context:
+            # 1순위: 복합 키워드 검색
+            img_data = search_wikimedia_image(f"{char_name} {kw}") or search_wikimedia_image(kw)
+            if img_data:
+                return img_data
+
+    # 2순위: 질문 내 핵심 어절 + 인물명 조합 검색
+    stop_words = {"무엇", "어떤", "누구", "언제", "어디", "어떻게", "왜", "알려줘", "대해", "설명해줘", "했나요", "있었나요"}
+    words = [w for w in user_question.split() if len(w) >= 2 and w not in stop_words]
+    for word in words:
+        img_data = search_wikimedia_image(f"{char_name} {word}")
+        if img_data:
+            return img_data
+
+    # 3순위: 인물명 단독 검색
+    return search_wikimedia_image(char_name)
+
+# [4. 제미나이(Gemini) 답변 생성 함수]
 def get_persona_answer(char_name, user_question, char_data):
     api_key = get_gemini_api_key()
     if not api_key:
@@ -137,9 +234,10 @@ def get_persona_answer(char_name, user_question, char_data):
         
         # 신속하고 안정적인 실 서비스 모델 리스트
         candidate_models = [
-            "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-3.8-flash",
+            "gemini-1.5-pro",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         ]
         
@@ -170,14 +268,22 @@ def get_persona_answer(char_name, user_question, char_data):
     except Exception as e:
         return f"[{char_name}의 답변] : 시스템 오류: {str(e)}"
 
-# [3. 대화 세션 및 렌더링 (Streamlit 표준 placeholder 패턴)]
+# [5. 대화 세션 및 렌더링]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 기존 대화 기록 출력
+# 기존 대화 기록 출력 (사료 이미지 포함)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message.get("image_info"):
+            img = message["image_info"]
+            st.image(
+                img["image_url"],
+                caption=f"📷 [역사 사료] {img['title']} ({img['description']})",
+                use_container_width=True
+            )
+            st.caption(f"출처: [Wikimedia / 위키백과 사료 보기]({img['page_url']})")
 
 # 질문 입력 및 응답 생성
 if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
@@ -186,14 +292,27 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 2. 어시스턴트 메시지 (placeholder 활용으로 확실한 렌더링 보장)
+    # 2. 어시스턴트 메시지 (답변 + 위키미디어 사료 이미지)
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        with st.spinner(f"{char_name} 님이 답변을 작성하고 있습니다..."):
+        with st.spinner(f"{char_name} 님이 답변을 작성하고 사료를 검색하고 있습니다..."):
             response_text = get_persona_answer(char_name, prompt, char_data)
-            full_response = f"{response_text}\n\n🔗 [근거 자료 확인하기]({char_data['url']})"
-        
-        # placeholder에 최종 텍스트 주입 (증발 방지)
+            wiki_image = get_relevant_history_image(char_name, prompt, response_text)
+            full_response = f"{response_text}\n\n🔗 [박물관 오픈아카이브 원문]({char_data['url']})"
+
         message_placeholder.markdown(full_response)
         
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+        # 위키미디어에서 검색된 역사 사료 이미지 렌더링
+        if wiki_image:
+            st.image(
+                wiki_image["image_url"],
+                caption=f"📷 [역사 사료] {wiki_image['title']} ({wiki_image['description']})",
+                use_container_width=True
+            )
+            st.caption(f"출처: [Wikimedia / 위키백과 사료 보기]({wiki_image['page_url']})")
+        
+    # 세션 상태에 답변 및 이미지 정보 저장 (새로고침 시 유지)
+    msg_record = {"role": "assistant", "content": full_response}
+    if wiki_image:
+        msg_record["image_info"] = wiki_image
+    st.session_state.messages.append(msg_record)
