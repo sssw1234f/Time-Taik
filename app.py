@@ -28,26 +28,73 @@ knowledge_base = {
     }
 }
 
-# [API 키 취득 헬퍼]
-def get_gemini_api_key():
-    # 1. 수동 입력 세션 키 우선
-    if st.session_state.get("user_gemini_key"):
-        return st.session_state["user_gemini_key"].strip()
+# [.env 로컬 파일 자동 로드 헬퍼]
+def load_env_file():
+    for env_path in [".env", "../.env"]:
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#") or "=" not in line:
+                            continue
+                        k, v = line.split("=", 1)
+                        k = k.strip()
+                        v = v.strip().strip("'\"")
+                        if k and v and k not in os.environ:
+                            os.environ[k] = v
+            except Exception:
+                pass
 
-    # 2. 환경변수 탐색
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if api_key:
-        return api_key.strip()
+# [API 키 다중 취득 및 이중화 헬퍼]
+def get_gemini_api_keys():
+    """
+    1차/2차 API 키를 수집하여 우선순위 리스트(Failover 순서)로 반환
+    지원 환경 변수: VITE_GEMINI_API_KEY_1/2, GEMINI_API_KEY_1/2, GOOGLE_API_KEY_1/2 등
+    """
+    load_env_file()
+    keys = []
 
-    # 3. Streamlit secrets 탐색
+    def _add_key(k_val):
+        if k_val:
+            cleaned = str(k_val).strip()
+            if cleaned and cleaned not in keys:
+                keys.append(cleaned)
+
+    # 1. 사이드바 수동 입력 키 (Key 1, Key 2)
+    _add_key(st.session_state.get("user_gemini_key_1"))
+    _add_key(st.session_state.get("user_gemini_key_2"))
+    _add_key(st.session_state.get("user_gemini_key"))
+
+    # 2. 이중화 환경 변수 후보군 (VITE_ 및 일반 접두사 지원)
+    pair_names = [
+        ("VITE_GEMINI_API_KEY_1", "VITE_GEMINI_API_KEY_2"),
+        ("GEMINI_API_KEY_1", "GEMINI_API_KEY_2"),
+        ("GOOGLE_API_KEY_1", "GOOGLE_API_KEY_2"),
+    ]
+    for k1, k2 in pair_names:
+        _add_key(os.getenv(k1))
+        _add_key(os.getenv(k2))
+
+    # 3. Streamlit Secrets 확인
     try:
         if hasattr(st, "secrets"):
-            for k in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api_key", "google_api_key"]:
-                if k in st.secrets and st.secrets[k]:
-                    return str(st.secrets[k]).strip()
+            for k1, k2 in pair_names:
+                if k1 in st.secrets:
+                    _add_key(st.secrets[k1])
+                if k2 in st.secrets:
+                    _add_key(st.secrets[k2])
+            for s_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api_key", "google_api_key", "GEMINI_API_KEY_SECONDARY"]:
+                if s_name in st.secrets:
+                    _add_key(st.secrets[s_name])
     except Exception:
         pass
-    return None
+
+    # 4. 단일 기본 환경 변수
+    for s_name in ["GEMINI_API_KEY", "GOOGLE_API_KEY", "gemini_api_key", "google_api_key", "GEMINI_API_KEY_SECONDARY"]:
+        _add_key(os.getenv(s_name))
+
+    return keys
 
 # [2. UI 설정]
 st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
@@ -59,21 +106,28 @@ st.sidebar.header("⚙️ 대화 설정")
 char_name = st.sidebar.selectbox("대화할 인물을 선택하세요:", list(knowledge_base.keys()))
 char_data = knowledge_base[char_name]
 
-# API 키 연결 상태 및 수동 입력 폴백
-current_key = get_gemini_api_key()
-if current_key:
-    st.sidebar.success("🟢 Gemini API 연결됨")
+# API 키 연결 상태 및 페일오버(Failover) 지원 UI
+current_keys = get_gemini_api_keys()
+if len(current_keys) >= 2:
+    st.sidebar.success(f"🟢 Gemini 연결됨 (활성 키 {len(current_keys)}개 / 자동 페일오버 가동)")
+elif len(current_keys) == 1:
+    st.sidebar.info("🟡 Gemini 연결됨 (단일 키 사용 중)")
+    with st.sidebar.expander("➕ 보조 API 키 등록 (할당량 초과 방지)"):
+        key2_in = st.text_input("보조 API 키 (Key #2):", type="password", placeholder="AIzaSy...", key="sub_key_in")
+        if key2_in and st.button("보조 키 등록", key="btn_sub_save"):
+            st.session_state["user_gemini_key_2"] = key2_in
+            st.rerun()
 else:
     st.sidebar.error("🔴 Gemini API 키 미등록")
-    user_key_input = st.sidebar.text_input(
-        "API 키 직접 입력:",
-        type="password",
-        placeholder="AIzaSy...",
-        help="Streamlit Secrets에 등록되지 않은 경우 여기에 바로 입력하세요."
-    )
-    if user_key_input:
-        st.session_state["user_gemini_key"] = user_key_input
-        st.rerun()
+    with st.sidebar.expander("🔑 API 키 직접 등록", expanded=True):
+        key1_in = st.text_input("기본 API 키 (Key #1):", type="password", placeholder="AIzaSy...", key="key1_in")
+        key2_in = st.text_input("보조 API 키 (Key #2 - 권장):", type="password", placeholder="AIzaSy...", key="key2_in")
+        if st.button("API 키 저장", key="btn_keys_save"):
+            if key1_in:
+                st.session_state["user_gemini_key_1"] = key1_in
+            if key2_in:
+                st.session_state["user_gemini_key_2"] = key2_in
+            st.rerun()
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
 if "current_char" not in st.session_state:
@@ -217,31 +271,44 @@ def get_relevant_history_image(char_name, user_question, response_text=""):
     # 3순위: 인물명 단독 검색
     return search_wikimedia_image(char_name)
 
-# [4. 제미나이(Gemini) 답변 생성 함수]
+# [4. 제미나이(Gemini) 답변 생성 함수 (다중 키 자동 페일오버 지원)]
 def get_persona_answer(char_name, user_question, char_data):
-    api_key = get_gemini_api_key()
-    if not api_key:
-        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 직접 입력하거나 Streamlit Secrets에 등록해주세요."
+    api_keys = get_gemini_api_keys()
+    if not api_keys:
+        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 입력하거나 .env 또는 Streamlit Secrets에 등록해주세요."
 
-    try:
-        genai.configure(api_key=api_key)
+    system_instruction = (
+        f"당신은 {char_name}입니다. {char_data['persona']}\n"
+        f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
+        f"답변 시 역사적 사실에 기반하여 성실히 답하세요."
+    )
+    
+    # 안정적인 실 서비스 모델 리스트
+    candidate_models = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gemini-2.5-flash",
+        "gemini-flash-latest"
+    ]
+
+    total_keys = len(api_keys)
+    last_error = ""
+
+    # 🔄 [Key Failover 루프]
+    for key_idx, api_key in enumerate(api_keys, start=1):
+        masked_key = f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "***"
+        print(f"[Gemini API] 시도 중: Key #{key_idx}/{total_keys} ({masked_key})")
         
-        system_instruction = (
-            f"당신은 {char_name}입니다. {char_data['persona']}\n"
-            f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
-            f"답변 시 역사적 사실에 기반하여 성실히 답하세요."
-        )
-        
-        # 신속하고 안정적인 실 서비스 모델 리스트
-        candidate_models = [
-            "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
-        ]
-        
-        last_error = ""
+        try:
+            genai.configure(api_key=api_key)
+        except Exception as config_err:
+            print(f"[Gemini API Config Error] Key #{key_idx} 설정 오류: {config_err}")
+            last_error = str(config_err)
+            continue
+
+        key_hit_quota = False
+
         for model_name in candidate_models:
             try:
                 model = genai.GenerativeModel(
@@ -257,16 +324,28 @@ def get_persona_answer(char_name, user_question, char_data):
                     text_content = response.candidates[0].content.parts[0].text
                 
                 if text_content and text_content.strip():
+                    if key_idx > 1:
+                        print(f"✅ [Failover Success] Key #{key_idx}로 자동 전환 후 [{model_name}] 모델 답변 생성 성공!")
                     return text_content.strip()
             except Exception as e:
-                last_error = str(e)
+                err_str = str(e)
+                last_error = err_str
+                # Quota 초과 / Rate Limit (429, ResourceExhausted) 감지
+                if any(q in err_str.lower() for q in ["429", "quota", "resourceexhausted", "rate limit", "ratelimit"]):
+                    key_hit_quota = True
+                    print(f"⚠️ [Quota Limit Detected] Key #{key_idx} 할당량 초과 감지 ({model_name}): {err_str[:60]}")
+                    break  # 해당 키는 소진되었으므로 다음 모델 대신 다음 키로 즉시 Failover!
                 continue
-                
-        if "429" in last_error or "quota" in last_error.lower():
-            return f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. 약 20~30초 후에 다시 질문을 입력해 주세요."
-        return f"[{char_name}의 답변] : API 오류 발생: {last_error}"
-    except Exception as e:
-        return f"[{char_name}의 답변] : 시스템 오류: {str(e)}"
+
+        # Quota 초과로 중단되었고 다음 보조 키가 있는 경우 페일오버 안내 로그
+        if key_hit_quota and key_idx < total_keys:
+            print(f"🔄 [Failover Triggered] Key #{key_idx} 할당량 초과 -> 보조 Key #{key_idx+1}로 즉시 자동 전환하여 재시도합니다.")
+            continue
+
+    # 모든 키 순회 후에도 실패한 경우
+    if any(q in last_error.lower() for q in ["429", "quota", "resourceexhausted", "rate limit"]):
+        return f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. (등록된 {total_keys}개의 API 키 모두 소진) 약 20~30초 후에 다시 질문을 입력해 주세요."
+    return f"[{char_name}의 답변] : API 오류 발생: {last_error}"
 
 # [5. 대화 세션 및 렌더링]
 if "messages" not in st.session_state:
