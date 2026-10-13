@@ -178,112 +178,143 @@ with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
 
-# [3. 위키미디어(Wikimedia) REST API 연동 함수]
+# [3. 위키미디어(Wikimedia) REST API 연동 및 엄격 검증 함수]
 WIKI_HEADERS = {
     "User-Agent": "TimeTalkBot/1.0 (Educational Project; mailto:history@timetalk.org)"
 }
 
-def search_wikimedia_image(query):
+EXCLUDE_PATTERNS = [
+    "map", "location", "locator", "plan", "지도", "도면", "위치도",
+    "logo", "icon", "symbol", "flag", "emblem", "mark",
+    "stub", "disambig", "badge", "question_mark", ".svg"
+]
+
+STOP_KEYWORDS = {
+    "없음", "none", "null", "인사", "안녕", "반가워", "질문", "대화", "감사", ""
+}
+
+def is_valid_historical_image(url, title, description):
+    """지도, 로고, 다이어그램 등 부적합한 이미지 필터링"""
+    combined = f"{url} {title} {description}".lower()
+    for pattern in EXCLUDE_PATTERNS:
+        if pattern in combined:
+            return False
+    return True
+
+def search_wikimedia_image_strict(keyword):
     """
-    위키미디어 / 위키백과 REST API를 통해 검색어에 맞는 공식 역사 사료 이미지 검색
+    LLM이 추출한 단일 핵심 키워드(명사 1~2개)로만 위키미디어를 검색하고,
+    키워드와 제목이 일치하는 신뢰도 높은 사료 이미지만 선별.
+    일치하는 결과가 없거나 연관성이 낮으면 안전장치(None)로 Fallback.
     """
-    if not query:
+    if not keyword:
         return None
-    encoded = urllib.parse.quote(query.strip())
-    
-    # 1. 한국어 위키백과 검색 REST API
-    wiki_url = f"https://ko.wikipedia.org/w/rest.php/v1/search/page?q={encoded}&limit=3"
+
+    cleaned_kw = keyword.strip()
+    if cleaned_kw.lower() in STOP_KEYWORDS or len(cleaned_kw) < 2:
+        return None
+
+    encoded = urllib.parse.quote(cleaned_kw)
+
+    # 1. 한국어 위키백과 REST 검색 API (최우선)
+    wiki_url = f"https://ko.wikipedia.org/w/rest.php/v1/search/page?q={encoded}&limit=5"
     try:
         req = urllib.request.Request(wiki_url, headers=WIKI_HEADERS)
         with urllib.request.urlopen(req, timeout=4) as res:
             data = json.loads(res.read().decode("utf-8"))
             for page in data.get("pages", []):
                 thumb = page.get("thumbnail")
-                if thumb and thumb.get("url"):
-                    raw_url = thumb["url"]
-                    if raw_url.startswith("//"):
-                        raw_url = "https:" + raw_url
-                    # 고화질(500px) 썸네일로 변환
-                    hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
-                    page_title = page.get("title", "")
-                    return {
-                        "title": page_title,
-                        "description": page.get("description", "") or "위키백과 역사 사료",
-                        "image_url": hd_url,
-                        "page_url": f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(page_title)}"
-                    }
+                if not thumb or not thumb.get("url"):
+                    continue
+                raw_url = thumb["url"]
+                page_title = page.get("title", "")
+                desc = page.get("description", "") or ""
+
+                # 지도, SVG, 로고 필터링
+                if not is_valid_historical_image(raw_url, page_title, desc):
+                    continue
+
+                # 키워드와 페이지 제목의 일치성 검증 (제목이나 키워드에 상호 포함)
+                norm_kw = re.sub(r"[\s\-_·]", "", cleaned_kw)
+                norm_title = re.sub(r"[\s\-_·]", "", page_title)
+                if norm_kw not in norm_title and norm_title not in norm_kw:
+                    continue
+
+                if raw_url.startswith("//"):
+                    raw_url = "https:" + raw_url
+                hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
+                return {
+                    "keyword": cleaned_kw,
+                    "title": page_title,
+                    "description": desc or f"{cleaned_kw} 관련 역사 자료",
+                    "image_url": hd_url,
+                    "page_url": f"https://ko.wikipedia.org/wiki/{urllib.parse.quote(page_title)}"
+                }
     except Exception:
         pass
 
-    # 2. 위키미디어 커먼즈(Commons) REST API 폴백
+    # 2. 위키미디어 커먼즈(Commons) REST API (위키백과 부재 시 폴백)
     try:
-        commons_url = f"https://commons.wikimedia.org/w/rest.php/v1/search/page?q={encoded}&limit=3"
+        commons_url = f"https://commons.wikimedia.org/w/rest.php/v1/search/page?q={encoded}&limit=5"
         req = urllib.request.Request(commons_url, headers=WIKI_HEADERS)
         with urllib.request.urlopen(req, timeout=4) as res:
             data = json.loads(res.read().decode("utf-8"))
             for page in data.get("pages", []):
                 thumb = page.get("thumbnail")
-                if thumb and thumb.get("url"):
-                    raw_url = thumb["url"]
-                    if raw_url.startswith("//"):
-                        raw_url = "https:" + raw_url
-                    hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
-                    clean_title = page.get("title", "").replace("File:", "").replace("_", " ")
-                    return {
-                        "title": clean_title,
-                        "description": "Wikimedia Commons 공식 사료",
-                        "image_url": hd_url,
-                        "page_url": f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(page.get('title', ''))}"
-                    }
+                if not thumb or not thumb.get("url"):
+                    continue
+                raw_url = thumb["url"]
+                page_title = page.get("title", "")
+                desc = page.get("description", "") or ""
+
+                if not is_valid_historical_image(raw_url, page_title, desc):
+                    continue
+
+                clean_title = page_title.replace("File:", "").replace("_", " ")
+                norm_kw = re.sub(r"[\s\-_·]", "", cleaned_kw)
+                norm_title = re.sub(r"[\s\-_·]", "", clean_title)
+                if norm_kw not in norm_title:
+                    continue
+
+                if raw_url.startswith("//"):
+                    raw_url = "https:" + raw_url
+                hd_url = re.sub(r"/\d+px-", "/500px-", raw_url)
+                return {
+                    "keyword": cleaned_kw,
+                    "title": clean_title,
+                    "description": "Wikimedia Commons 사료",
+                    "image_url": hd_url,
+                    "page_url": f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(page_title)}"
+                }
     except Exception:
         pass
 
     return None
 
-def get_relevant_history_image(char_name, user_question, response_text=""):
+# [4. 제미나이(Gemini) 답변 생성 및 시각자료 키워드 추출 함수]
+def get_persona_answer_with_keyword(char_name, user_question, char_data):
     """
-    질문과 답변 맥락에 맞춰 위키미디어 REST API에서 가장 적합한 역사 사진을 검색
+    LLM 답변을 생성하며, 대화 맥락에서 우측 패널에 띄울 '가장 핵심적인 시각 자료 검색어(명사 1개)'를 분리 추출.
+    반환: (clean_response_text, extracted_keyword)
     """
-    context = f"{user_question} {response_text}"
-    
-    # 주요 역사 사건/장소 우선 검색 키워드
-    priority_keywords = [
-        "하얼빈 의거", "하얼빈", "이토 히로부미", "뤼순 감옥", "동양평화론", "단지동맹",
-        "3·1 운동", "3.1 운동", "아우내 장터", "만세 운동", "서대문형무소", "이화학당",
-        "훙커우 공원 사건", "훙커우 공원", "홍커우 공원", "도시락 폭탄", "물통 폭탄", "한인애국단", "상하이 의거"
-    ]
-    
-    for kw in priority_keywords:
-        if kw in context:
-            # 1순위: 복합 키워드 검색
-            img_data = search_wikimedia_image(f"{char_name} {kw}") or search_wikimedia_image(kw)
-            if img_data:
-                return img_data
-
-    # 2순위: 질문 내 핵심 어절 + 인물명 조합 검색
-    stop_words = {"무엇", "어떤", "누구", "언제", "어디", "어떻게", "왜", "알려줘", "대해", "설명해줘", "했나요", "있었나요"}
-    words = [w for w in user_question.split() if len(w) >= 2 and w not in stop_words]
-    for word in words:
-        img_data = search_wikimedia_image(f"{char_name} {word}")
-        if img_data:
-            return img_data
-
-    # 3순위: 인물명 단독 검색
-    return search_wikimedia_image(char_name)
-
-# [4. 제미나이(Gemini) 답변 생성 함수 (다중 키 자동 페일오버 지원)]
-def get_persona_answer(char_name, user_question, char_data):
     api_keys = get_gemini_api_keys()
     if not api_keys:
-        return f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 입력하거나 .env 또는 Streamlit Secrets에 등록해주세요."
+        err_msg = f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 입력하거나 .env 또는 Streamlit Secrets에 등록해주세요."
+        return err_msg, None
 
     system_instruction = (
-        f"당신은 {char_name}입니다. {char_data['persona']}\n"
+        f"당신은 대한민국의 역사 인물 '{char_name}'입니다. {char_data['persona']}\n"
         f"다음은 당신의 삶에 대한 역사적 사실입니다: {char_data['fact']}\n"
-        f"답변 시 역사적 사실에 기반하여 성실히 답하세요."
+        f"답변 시 역사적 사실에 기반하여 성실히 답하세요.\n\n"
+        f"【필수 시각자료 지침】\n"
+        f"답변의 가장 마지막 줄에, 답변 내용 중 학생들에게 화면으로 보여줄 '가장 핵심적인 역사적 장소/유물/사건 명사 1개'를 반드시 다음 형식으로 1줄만 작성하세요:\n"
+        f"[시각자료_검색어: 키워드]\n"
+        f"- 예시 1: 답변에서 탑골공원을 언급한 경우 -> [시각자료_검색어: 탑골공원]\n"
+        f"- 예시 2: 답변에서 하얼빈역을 언급한 경우 -> [시각자료_검색어: 하얼빈역]\n"
+        f"- 예시 3: 답변에서 서대문형무소를 언급한 경우 -> [시각자료_검색어: 서대문형무소]\n"
+        f"- 일상적 인사나 특정 시각 자료를 특정하기 어려울 경우 -> [시각자료_검색어: 없음]"
     )
-    
-    # 안정적인 실 서비스 모델 리스트
+
     candidate_models = [
         "gemini-2.0-flash",
         "gemini-1.5-flash",
@@ -299,7 +330,7 @@ def get_persona_answer(char_name, user_question, char_data):
     for key_idx, api_key in enumerate(api_keys, start=1):
         masked_key = f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "***"
         print(f"[Gemini API] 시도 중: Key #{key_idx}/{total_keys} ({masked_key})")
-        
+
         try:
             genai.configure(api_key=api_key)
         except Exception as config_err:
@@ -316,42 +347,53 @@ def get_persona_answer(char_name, user_question, char_data):
                     system_instruction=system_instruction
                 )
                 response = model.generate_content(user_question)
-                
-                text_content = ""
+
+                raw_text = ""
                 if hasattr(response, "text") and response.text:
-                    text_content = response.text
+                    raw_text = response.text
                 elif response.candidates and response.candidates[0].content.parts:
-                    text_content = response.candidates[0].content.parts[0].text
-                
-                if text_content and text_content.strip():
+                    raw_text = response.candidates[0].content.parts[0].text
+
+                if raw_text and raw_text.strip():
                     if key_idx > 1:
                         print(f"✅ [Failover Success] Key #{key_idx}로 자동 전환 후 [{model_name}] 모델 답변 생성 성공!")
-                    return text_content.strip()
+
+                    # 키워드 태그 정규식 파싱
+                    target_kw = None
+                    kw_match = re.search(r"\[시각자료_검색어:\s*([^\]]+)\]", raw_text)
+                    if kw_match:
+                        extracted = kw_match.group(1).strip()
+                        if extracted not in STOP_KEYWORDS and len(extracted) >= 2:
+                            target_kw = extracted
+                        clean_text = re.sub(r"\[시각자료_검색어:\s*[^\]]+\]", "", raw_text).strip()
+                    else:
+                        clean_text = raw_text.strip()
+
+                    return clean_text, target_kw
             except Exception as e:
                 err_str = str(e)
                 last_error = err_str
-                # Quota 초과 / Rate Limit (429, ResourceExhausted) 감지
                 if any(q in err_str.lower() for q in ["429", "quota", "resourceexhausted", "rate limit", "ratelimit"]):
                     key_hit_quota = True
-                    print(f"⚠️ [Quota Limit Detected] Key #{key_idx} 할당량 초과 감지 ({model_name}): {err_str[:60]}")
-                    break  # 해당 키는 소진되었으므로 다음 모델 대신 다음 키로 즉시 Failover!
+                    print(f"⚠️ [Quota Limit Detected] Key #{key_idx} 할당량 초과 ({model_name}): {err_str[:60]}")
+                    break
                 continue
 
-        # Quota 초과로 중단되었고 다음 보조 키가 있는 경우 페일오버 안내 로그
         if key_hit_quota and key_idx < total_keys:
-            print(f"🔄 [Failover Triggered] Key #{key_idx} 할당량 초과 -> 보조 Key #{key_idx+1}로 즉시 자동 전환하여 재시도합니다.")
+            print(f"🔄 [Failover Triggered] Key #{key_idx} 할당량 초과 -> 보조 Key #{key_idx+1}로 자동 전환 재시도")
             continue
 
-    # 모든 키 순회 후에도 실패한 경우
     if any(q in last_error.lower() for q in ["429", "quota", "resourceexhausted", "rate limit"]):
-        return f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. (등록된 {total_keys}개의 API 키 모두 소진) 약 20~30초 후에 다시 질문을 입력해 주세요."
-    return f"[{char_name}의 답변] : API 오류 발생: {last_error}"
+        err_msg = f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. (등록된 {total_keys}개의 API 키 모두 소진) 약 20~30초 후에 다시 질문을 입력해 주세요."
+    else:
+        err_msg = f"[{char_name}의 답변] : API 오류 발생: {last_error}"
+    return err_msg, None
 
-# [5. 대화 세션 및 렌더링]
+# [5. 대화 세션 및 UI 렌더링 동기화]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 기존 대화 기록 출력 (사료 이미지 포함)
+# 기존 대화 기록 출력 (사료 이미지 또는 Fallback 안내)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -359,10 +401,12 @@ for message in st.session_state.messages:
             img = message["image_info"]
             st.image(
                 img["image_url"],
-                caption=f"📷 [역사 사료] {img['title']} ({img['description']})",
+                caption=f"📷 [역사 사료: {img.get('keyword', '')}] {img['title']} ({img['description']})",
                 use_container_width=True
             )
             st.caption(f"출처: [Wikimedia / 위키백과 사료 보기]({img['page_url']})")
+        elif message.get("show_fallback"):
+            st.caption("ℹ️ 관련 시각 자료 없음 (일치하는 공인 사료 사진 없음)")
 
 # 질문 입력 및 응답 생성
 if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
@@ -371,27 +415,32 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # 2. 어시스턴트 메시지 (답변 + 위키미디어 사료 이미지)
+    # 2. 어시스턴트 메시지 (답변 생성 + 타겟 키워드 검색 + 실시간 동기화)
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        with st.spinner(f"{char_name} 님이 답변을 작성하고 사료를 검색하고 있습니다..."):
-            response_text = get_persona_answer(char_name, prompt, char_data)
-            wiki_image = get_relevant_history_image(char_name, prompt, response_text)
+        with st.spinner(f"{char_name} 님이 답변을 작성하고 시각 자료를 검증하고 있습니다..."):
+            response_text, target_keyword = get_persona_answer_with_keyword(char_name, prompt, char_data)
+            
+            # 타겟 키워드로 엄격한 위키미디어 검색 수행
+            wiki_image = search_wikimedia_image_strict(target_keyword) if target_keyword else None
             full_response = f"{response_text}\n\n🔗 [박물관 오픈아카이브 원문]({char_data['url']})"
 
+        # 답변 텍스트 즉시 렌더링
         message_placeholder.markdown(full_response)
-        
-        # 위키미디어에서 검색된 역사 사료 이미지 렌더링
+
+        # 이미지 또는 Fallback 안전장치 렌더링
+        msg_record = {"role": "assistant", "content": full_response}
         if wiki_image:
             st.image(
                 wiki_image["image_url"],
-                caption=f"📷 [역사 사료] {wiki_image['title']} ({wiki_image['description']})",
+                caption=f"📷 [역사 사료: {wiki_image['keyword']}] {wiki_image['title']} ({wiki_image['description']})",
                 use_container_width=True
             )
             st.caption(f"출처: [Wikimedia / 위키백과 사료 보기]({wiki_image['page_url']})")
-        
-    # 세션 상태에 답변 및 이미지 정보 저장 (새로고침 시 유지)
-    msg_record = {"role": "assistant", "content": full_response}
-    if wiki_image:
-        msg_record["image_info"] = wiki_image
+            msg_record["image_info"] = wiki_image
+        else:
+            st.caption("ℹ️ 관련 시각 자료 없음 (일치하는 공인 사료 사진 없음)")
+            msg_record["show_fallback"] = True
+
+    # 세션 상태에 저장하여 새로고침 시에도 동일하게 동기화 유지
     st.session_state.messages.append(msg_record)
