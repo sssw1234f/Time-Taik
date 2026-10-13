@@ -168,10 +168,10 @@ if st.sidebar.button("🧹 대화 내용 초기화", use_container_width=True):
     st.rerun()
 
 # 사이드바 하단 여백 및 공공누리(공공데이터 오픈) 이미지
-st.sidebar.markdown("<div style='height: 120px;'></div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='height: 220px;'></div>", unsafe_allow_html=True)
 try:
     if os.path.exists("img_opentype09.png"):
-        st.sidebar.image("img_opentype09.png", use_container_width=True)
+        st.sidebar.image("img_opentype09.png", width=160)
 except Exception:
     pass
 
