@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import io
 import urllib.request
 import urllib.parse
 import json
@@ -137,124 +138,324 @@ if st.session_state.current_char != char_name:
     st.session_state.messages = []
     st.session_state.current_char = char_name
 
-# -------- Teacher worksheet generation ----------
+# -------- Teacher worksheet generation (Modal & PDF) ----------
+WORKSHEET_PROFILES = {
+    "유관순": {
+        "background": (
+            "1919년 3월 1일 서울 탑골공원에서 시작된 3·1 만세 운동은 전 민족적 자주독립 투쟁으로 요원의 불길처럼 확산되었습니다. "
+            "이화학당 고등과에 재학 중이던 유관순 열사는 일제의 휴교령 속에서도 위험을 무릅쓰고 고향 천안으로 내려가 직접 태극기를 만들어 주민들에게 나누어주고, "
+            "1919년 4월 1일 아우내 장터 만세 시위를 주도하여 수천 명의 민중과 함께 대한독립 만세를 외쳤습니다. "
+            "부모님이 일제 헌병의 총칼에 현장에서 순국하고 본인 또한 체포되어 서대문형무소에 수감되었으나, 모진 고문과 탄압 속에서도 옥중 만세 투쟁을 끝까지 멈추지 않으며 "
+            "조국의 자주독립과 인간 존엄의 가치를 온몸으로 증명하였습니다."
+        ),
+        "elementary": "유관순 열사는 왜 안전한 서울에 머물지 않고 위험을 무릅쓰며 고향 천안 아우내 장터로 내려가 태극기를 나누어 주었을까요? 열사의 용기 있는 행동을 바탕으로 이야기해 봅시다.",
+        "middle": "일제의 가혹한 총칼 앞에서도 굴하지 않고 옥중에서까지 만세를 외쳤던 유관순 열사의 결단은 당시 국내외 독립운동 전반과 민족의식에 어떤 파급효과를 가져왔을까요?",
+        "high": "유관순 열사가 온몸으로 지켜낸 '자유와 독립'의 숭고한 가치를 오늘날 우리가 마주한 인권 신장, 민주주의 수호, 혹은 사회적 약자 연대의 관점에서 비판적으로 재해석해 보고, 현대 시민으로서 실천할 수 있는 용기는 무엇인지 논술해 봅시다.",
+        "quiz_blanks": [
+            "유관순 열사가 고향 천안에서 수천 명의 군중과 함께 독립 만세를 외쳤던 장소는 1919년 4월 1일의 ( ____________ ) 장터입니다.",
+            "유관순 열사가 모진 고초를 겪으면서도 옥중 만세 투쟁을 이어가다 1920년 9월 28일 순국한 장소는 서울 ( ____________ ) 형무소입니다.",
+            "유관순 열사가 재학하며 민족의식과 근대 지식을 길렀던 여성 교육 기관은 ( ____________ ) 학당입니다."
+        ],
+        "essay": "만약 내가 1919년 봄, 일제의 감시와 헌병대의 총칼이 삼엄했던 시대에 살고 있었다면, 아우내 장터의 만세 행렬 속에서 어떤 선택과 행동을 했을지 서술해 보세요."
+    },
+    "안중근": {
+        "background": (
+            "대한제국 말기, 일제는 을사늑약과 군대 해산을 강행하며 국권을 불법적으로 강탈하고 한반도를 식민지화하려 했습니다. "
+            "안중근 의사는 연해주에서 동의단지회를 결성하여 손가락을 끊고 조국 독립을 맹세한 뒤, 1909년 10월 26일 중국 하얼빈 역에서 침략의 원흉인 이토 히로부미를 단호히 처단하였습니다. "
+            "의사는 체포된 이후에도 대한국 의군 참모중장의 자격으로 일제의 불법 침략 죄상 15개 조목을 당당히 밝혔으며, "
+            "순국 직전까지 뤼순 감옥에서 한·중·일 3국의 자주권 존중과 상호 협력을 통한 《동양평화론》을 저술하여 시대를 앞선 평화 사상을 인류에 남겼습니다."
+        ),
+        "elementary": "안중근 의사는 하얼빈 역에서 거사를 성공시킨 직후 도망치지 않고 러시아어로 '코레아 우라(대한독립 만세)'를 당당하게 외쳤습니다. 의사가 그 순간 당당할 수 있었던 이유는 무엇일까요?",
+        "middle": "안중근 의사가 자신을 단순한 테러리스트나 암살자가 아닌 '대한국 의군 참모중장'이자 '전쟁 포로'로 대우할 것을 당당히 요구한 것은 국제법 및 독립운동사에서 어떤 역사적 의의를 지닐까요?",
+        "high": "안중근 의사가 뤼순 감옥에서 주창한 《동양평화론》의 핵심 사상을 분석해 보고, 오늘날 군비 경쟁과 영토 분쟁이 지속되는 동북아시아의 평화 공존을 위해 이 사상을 어떻게 계승·적용할 수 있을지 비판적으로 논술해 봅시다.",
+        "quiz_blanks": [
+            "안중근 의사가 1909년 10월 26일 침략의 원흉 이토 히로부미를 처단한 역사적 장소는 중국 동북부의 ( ____________ ) 역입니다.",
+            "안중근 의사가 11명의 동지들과 함께 왼손 넷째 손가락을 자르고 피로써 조국 독립을 맹세한 결사 조직은 ( ____________ ) 입니다.",
+            "안중근 의사가 뤼순 옥중에서 집필하며 한·중·일 동양 3국의 공동 평화와 대등한 번영을 구상한 미완의 저서는 《 ( ____________ ) 》입니다."
+        ],
+        "essay": "만약 내가 1910년 뤼순 일본 관동도독부 법정에 선 안중근 의사의 변호인이었다면, 재판관들에게 안중근 의사의 거사에 대해 어떠한 법리적·역사적 변론을 펼쳤을지 서술해 보세요."
+    },
+    "윤봉길": {
+        "background": (
+            "1930년대 초, 일제가 만주사변과 상하이 사변을 잇따라 일으키며 대륙 침략을 노골화하던 시기, 대한민국 임시정부는 일제의 탄압과 재정난으로 침체기에 빠져 있었습니다. "
+            "고향 예산에서 농촌 계몽 운동에 힘쓰다 망명한 청년 윤봉길 의사는 김구 선생의 한인애국단에 입단하여, 1932년 4월 29일 상하이 훙커우 공원의 일왕 생일 및 전승 기념식장에 폭탄을 투척하였습니다. "
+            "이 거사는 일본 군부 수뇌부를 처단하고 침체되었던 임시정부의 활로를 열었으며, "
+            "중국 국민당 장제스 총통이 '중국의 100만 대군도 하지 못한 일을 조선의 한 청년이 해냈다'고 격찬하며 임시정부를 전폭 지원하는 결정적 계기를 마련했습니다."
+        ),
+        "elementary": "윤봉길 의사는 어린 두 아들에게 '피가 있고 뼈가 있다면 반드시 조선을 위해 용감한 투사가 되어라'라는 유서를 남겼습니다. 자신의 목숨보다 나라를 먼저 생각했던 의사의 마음에 대해 이야기해 봅시다.",
+        "middle": "훙커우 공원 거사에서 던진 물통 폭탄과 자결용 도시락 폭탄의 의미를 되새겨보고, 이 거사가 침체되어 있던 대한민국 임시정부와 한·중 연합 전선 형성에 미친 구체적 파급효과에 대해 토론해 봅시다.",
+        "high": "농촌 계몽 운동(부흥원, 월진회)을 통해 실력 양성에 힘쓰던 윤봉길 의사가 마침내 무장 의열 투쟁이라는 길을 선택하게 된 시대적 배경을 비판적으로 검토하고, 목적을 위한 실천 방식의 변화가 갖는 역사적 의미를 논술해 봅시다.",
+        "quiz_blanks": [
+            "윤봉길 의사가 1932년 4월 29일 일제 수뇌부를 향해 폭탄을 투척한 상하이의 공원 명칭은 ( ____________ ) 공원(현 루쉰 공원)입니다.",
+            "백범 김구 선생이 창설하여 윤봉길 의사와 이봉창 의사 등이 결사대로 활약한 대한민국 임시정부 산하 특무 조직은 ( ____________ ) 입니다.",
+            "윤봉길 의사가 고향 충남 예산에서 청년들을 계몽하고 농촌 부흥을 이끌기 위해 창립했던 농민 운동 단체는 ( ____________ ) 회입니다."
+        ],
+        "essay": "만약 내가 25세 청년 윤봉길이었다면, 가족과의 평온한 일상과 조국의 독립이라는 거대한 갈림길 앞에서 어떤 고뇌와 선택을 내렸을지 솔직한 생각을 서술해 보세요."
+    }
+}
+
+def get_worksheet_profile(char_name, char_data):
+    return WORKSHEET_PROFILES.get(char_name, {
+        "background": f"{char_name} 선생은 일제의 가혹한 침탈에 맞서 조국의 자주독립과 민족의 존엄을 지키기 위해 일생을 바치셨습니다. {char_data['fact']} 선생의 고결한 희생정신과 실천적 용기는 우리 역사의 든든한 초석이 되었습니다.",
+        "elementary": f"{char_name} 선생이 조국을 위해 실천한 가장 대표적인 행동은 무엇이며, 그 행동에서 무엇을 느낄 수 있나요?",
+        "middle": f"{char_name} 선생이 활동하던 시대의 어려움 속에서 내린 선택이 당시 민족사회에 미친 파급효과에 대해 토론해 봅시다.",
+        "high": f"{char_name} 선생의 생애와 사상을 현대 사회가 직면한 갈등과 과제에 비추어 비판적으로 고찰해 보고, 오늘날 우리가 계승해야 할 핵심 가치는 무엇인지 논술해 봅시다.",
+        "quiz_blanks": [
+            f"{char_name} 선생의 주요 활동과 관련된 역사적 연도와 장소를 사료를 통해 찾아보세요: ( ____________ )",
+            f"{char_name} 선생이 가담하거나 이끌었던 독립운동 조직의 명칭은 무엇인가요? ( ____________ )",
+            f"{char_name} 선생이 평생을 바쳐 지키고자 했던 핵심 역사적 가치는 무엇인가요? ( ____________ )"
+        ],
+        "essay": f"만약 내가 {char_name} 선생이 살았던 격동의 시대에 태어났다면, 나라와 민족의 위기 앞에서 어떤 선택을 했을지 서술해 보세요."
+    })
+
+def generate_worksheet_markdown(char_name, char_data):
+    p = get_worksheet_profile(char_name, char_data)
+    doc = [
+        f"## [{char_name}과 함께하는 역사 깊이 읽기]\n",
+        f"**| 일시:** 202&nbsp;&nbsp;년 &nbsp;&nbsp;&nbsp;&nbsp;월 &nbsp;&nbsp;&nbsp;&nbsp;일 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 학년/반:** &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 이름:** &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 학습 인물:** {char_name} 의사/열사\n",
+        "---\n",
+        "### 1. 짚어보기 (핵심 역사 배경 요약)",
+        f"> {p['background']}\n",
+        "### 2. 수준별 토론 및 생각 나누기 (Discussion)",
+        f"- **[초등학생 수준]** {p['elementary']}",
+        "  - ✍️ *나의 생각:* _____________________________________________________________________________________\n",
+        f"- **[중학생 수준]** {p['middle']}",
+        "  - ✍️ *나의 생각:* _____________________________________________________________________________________\n",
+        f"- **[고등학생 수준]** {p['high']}",
+        "  - ✍️ *나의 생각:* _____________________________________________________________________________________\n",
+        "### 3. 정밀 분석: 사료 및 팩트 퀴즈 (Quiz)",
+        f"1. {p['quiz_blanks'][0]}",
+        f"2. {p['quiz_blanks'][1]}",
+        f"3. {p['quiz_blanks'][2]}",
+        f"4. **[서술형 퀴즈]** {p['essay']}",
+        "   - ✍️ *서술 답안:* _____________________________________________________________________________________\n",
+        "### 4. 나만의 역사 한 줄 평 & 메타인지 (Reflection)",
+        f"- **오늘 대화한 내용을 바탕으로 {char_name} 님에게 보내는 한 줄 평:**",
+        "  > [                                                                                               ]",
+        "- **내가 느낀 점을 서술하는 메타인지 기록장:**",
+        "  - *오늘 대화를 통해 새롭게 깨달은 역사적 사실:* __________________________________________________",
+        "  - *선생의 삶이 현대의 나에게 주는 교훈과 다짐:* __________________________________________________\n",
+        "---\n",
+        f"🔗 **[사료 근거 및 원문 확인하기]({char_data['url']})** (대한민국역사박물관 오픈아카이브)"
+    ]
+    return "\n".join(doc)
+
+def get_korean_font_path():
+    candidates = [
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/gulim.ttc",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "NanumGothic.ttf"
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    local_f = "NanumGothic.ttf"
+    if not os.path.exists(local_f):
+        try:
+            url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                with open(local_f, "wb") as f:
+                    f.write(resp.read())
+            if os.path.exists(local_f):
+                return local_f
+        except Exception:
+            pass
+    return None
+
+def generate_worksheet_pdf(char_name, char_data):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        font_path = get_korean_font_path()
+        if not font_path:
+            return None
+
+        font_name = "KoreanFont"
+        if font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(font_name, font_path))
+
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=36,
+            leftMargin=36,
+            topMargin=30,
+            bottomMargin=30
+        )
+
+        title_style = ParagraphStyle(
+            "TitleStyle",
+            fontName=font_name,
+            fontSize=15,
+            leading=19,
+            alignment=1,
+            textColor=colors.HexColor("#111827")
+        )
+        info_style = ParagraphStyle(
+            "InfoStyle",
+            fontName=font_name,
+            fontSize=8,
+            leading=11,
+            alignment=1,
+            textColor=colors.HexColor("#4b5563")
+        )
+        h2_style = ParagraphStyle(
+            "H2Style",
+            fontName=font_name,
+            fontSize=10,
+            leading=13,
+            textColor=colors.HexColor("#1e40af"),
+            spaceBefore=5,
+            spaceAfter=2
+        )
+        body_style = ParagraphStyle(
+            "BodyStyle",
+            fontName=font_name,
+            fontSize=8,
+            leading=11,
+            textColor=colors.HexColor("#1f2937")
+        )
+        quote_style = ParagraphStyle(
+            "QuoteStyle",
+            fontName=font_name,
+            fontSize=7.8,
+            leading=11,
+            textColor=colors.HexColor("#374151")
+        )
+
+        p = get_worksheet_profile(char_name, char_data)
+
+        story = []
+        story.append(Paragraph(f"[{char_name}과 함께하는 역사 깊이 읽기]", title_style))
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(f"일시: 202&nbsp;&nbsp;년 &nbsp;&nbsp;월 &nbsp;&nbsp;일 &nbsp;&nbsp;|&nbsp;&nbsp; 학년/반: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |&nbsp;&nbsp; 이름: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |&nbsp;&nbsp; 대상 인물: {char_name} 의사/열사", info_style))
+        story.append(Spacer(1, 3))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#9ca3af"), spaceAfter=5))
+
+        story.append(Paragraph("1. 짚어보기 (핵심 역사 배경 요약)", h2_style))
+        story.append(Paragraph(p["background"], quote_style))
+        story.append(Spacer(1, 3))
+
+        story.append(Paragraph("2. 수준별 토론 및 생각 나누기 (Discussion)", h2_style))
+        story.append(Paragraph(f"• <b>[초등학생]</b> {p['elementary']}", body_style))
+        story.append(Paragraph("✍️ 나의 생각: ____________________________________________________________________________________", body_style))
+        story.append(Spacer(1, 1))
+        story.append(Paragraph(f"• <b>[중학생]</b> {p['middle']}", body_style))
+        story.append(Paragraph("✍️ 나의 생각: ____________________________________________________________________________________", body_style))
+        story.append(Spacer(1, 1))
+        story.append(Paragraph(f"• <b>[고등학생]</b> {p['high']}", body_style))
+        story.append(Paragraph("✍️ 나의 생각: ____________________________________________________________________________________", body_style))
+        story.append(Spacer(1, 3))
+
+        story.append(Paragraph("3. 정밀 분석: 사료 및 팩트 퀴즈 (Quiz)", h2_style))
+        story.append(Paragraph(f"1. {p['quiz_blanks'][0]}", body_style))
+        story.append(Paragraph(f"2. {p['quiz_blanks'][1]}", body_style))
+        story.append(Paragraph(f"3. {p['quiz_blanks'][2]}", body_style))
+        story.append(Paragraph(f"4. <b>[서술형 퀴즈]</b> {p['essay']}", body_style))
+        story.append(Paragraph("✍️ 서술 답안: ____________________________________________________________________________________", body_style))
+        story.append(Spacer(1, 3))
+
+        story.append(Paragraph("4. 나만의 역사 한 줄 평 & 메타인지 (Reflection)", h2_style))
+        story.append(Paragraph(f"• <b>오늘 대화한 내용을 바탕으로 {char_name} 님에게 보내는 한 줄 평:</b>", body_style))
+        story.append(Paragraph("[ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ]", body_style))
+        story.append(Paragraph("• <b>새롭게 깨달은 역사적 사실:</b> __________________________________________________________________", body_style))
+        story.append(Paragraph("• <b>선생의 삶이 현대의 나에게 주는 교훈과 다짐:</b> ________________________________________________", body_style))
+
+        doc.build(story)
+        return buffer.getvalue()
+    except Exception as e:
+        print(f"PDF creation failed: {e}")
+        return None
+
+# 모달 다이얼로그 함수 정의 (Streamlit dialog 기능 활용)
+if hasattr(st, "dialog"):
+    @st.dialog("📝 교사용 수업 활동지", width="large")
+    def open_worksheet_dialog(c_name, c_data):
+        ws_md = generate_worksheet_markdown(c_name, c_data)
+        st.markdown(ws_md)
+        st.markdown("---")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            st.download_button(
+                label="📥 마크다운 다운로드 (.md)",
+                data=ws_md,
+                file_name=f"{c_name}_worksheet.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+        with col_btn2:
+            pdf_bytes = generate_worksheet_pdf(c_name, c_data)
+            if pdf_bytes:
+                st.download_button(
+                    label="📄 PDF 다운로드 (.pdf)",
+                    data=pdf_bytes,
+                    file_name=f"{c_name}_worksheet.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.info("PDF 생성 모듈 로딩 중...")
+elif hasattr(st, "experimental_dialog"):
+    @st.experimental_dialog("📝 교사용 수업 활동지", width="large")
+    def open_worksheet_dialog(c_name, c_data):
+        ws_md = generate_worksheet_markdown(c_name, c_data)
+        st.markdown(ws_md)
+        st.markdown("---")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            st.download_button(
+                label="📥 마크다운 다운로드 (.md)",
+                data=ws_md,
+                file_name=f"{c_name}_worksheet.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+        with col_btn2:
+            pdf_bytes = generate_worksheet_pdf(c_name, c_data)
+            if pdf_bytes:
+                st.download_button(
+                    label="📄 PDF 다운로드 (.pdf)",
+                    data=pdf_bytes,
+                    file_name=f"{c_name}_worksheet.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            else:
+                st.info("PDF 생성 모듈 로딩 중...")
+else:
+    def open_worksheet_dialog(c_name, c_data):
+        st.session_state["show_worksheet_dialog"] = True
+
+# 사이드바 활동지 생성 버튼
 st.sidebar.markdown("---")
-if st.sidebar.button("📝 교사용 활동지 생성"):
-    msgs = st.session_state.get("messages", [])
-    def generate_worksheet(msgs, char_name, char_data):
-        profiles = {
-            "유관순": {
-                "background": (
-                    "1919년 3월 1일 서울 탑골공원에서 시작된 3·1 만세 운동은 전 민족적 자주독립 투쟁으로 요원의 불길처럼 확산되었습니다. "
-                    "이화학당 고등과에 재학 중이던 유관순 열사는 일제의 휴교령 속에서도 위험을 무릅쓰고 고향 천안으로 내려가 직접 태극기를 만들어 주민들에게 나누어주고, "
-                    "1919년 4월 1일 아우내 장터 만세 시위를 주도하여 수천 명의 민중과 함께 대한독립 만세를 외쳤습니다. "
-                    "부모님이 일제 헌병의 총칼에 현장에서 순국하고 본인 또한 체포되어 서대문형무소에 수감되었으나, 모진 고문과 탄압 속에서도 옥중 만세 투쟁을 끝까지 멈추지 않으며 "
-                    "조국의 자주독립과 인간 존엄의 가치를 온몸으로 증명하였습니다."
-                ),
-                "elementary": "유관순 열사는 왜 안전한 서울에 머물지 않고 위험을 무릅쓰며 고향 천안 아우내 장터로 내려가 태극기를 나누어 주었을까요? 열사의 용기 있는 행동을 바탕으로 이야기해 봅시다.",
-                "middle": "일제의 가혹한 총칼 앞에서도 굴하지 않고 옥중에서까지 만세를 외쳤던 유관순 열사의 결단은 당시 국내외 독립운동 전반과 민족의식에 어떤 파급효과를 가져왔을까요?",
-                "high": "유관순 열사가 온몸으로 지켜낸 '자유와 독립'의 숭고한 가치를 오늘날 우리가 마주한 인권 신장, 민주주의 수호, 혹은 사회적 약자 연대의 관점에서 비판적으로 재해석해 보고, 현대 시민으로서 실천할 수 있는 용기는 무엇인지 논술해 봅시다.",
-                "quiz_blanks": [
-                    "유관순 열사가 고향 천안에서 수천 명의 군중과 함께 독립 만세를 외쳤던 장소는 1919년 4월 1일의 ( ____________ ) 장터입니다.",
-                    "유관순 열사가 모진 고초를 겪으면서도 옥중 만세 투쟁을 이어가다 1920년 9월 28일 순국한 장소는 서울 ( ____________ ) 형무소입니다.",
-                    "유관순 열사가 재학하며 민족의식과 근대 지식을 길렀던 여성 교육 기관은 ( ____________ ) 학당입니다."
-                ],
-                "essay": "만약 내가 1919년 봄, 일제의 감시와 헌병대의 총칼이 삼엄했던 시대에 살고 있었다면, 아우내 장터의 만세 행렬 속에서 어떤 선택과 행동을 했을지 서술해 보세요."
-            },
-            "안중근": {
-                "background": (
-                    "대한제국 말기, 일제는 을사늑약과 군대 해산을 강행하며 국권을 불법적으로 강탈하고 한반도를 식민지화하려 했습니다. "
-                    "안중근 의사는 연해주에서 동의단지회를 결성하여 손가락을 끊고 조국 독립을 맹세한 뒤, 1909년 10월 26일 중국 하얼빈 역에서 침략의 원흉인 이토 히로부미를 단호히 처단하였습니다. "
-                    "의사는 체포된 이후에도 대한국 의군 참모중장의 자격으로 일제의 불법 침략 죄상 15개 조목을 당당히 밝혔으며, "
-                    "순국 직전까지 뤼순 감옥에서 한·중·일 3국의 자주권 존중과 상호 협력을 통한 《동양평화론》을 저술하여 시대를 앞선 평화 사상을 인류에 남겼습니다."
-                ),
-                "elementary": "안중근 의사는 하얼빈 역에서 거사를 성공시킨 직후 도망치지 않고 러시아어로 '코레아 우라(대한독립 만세)'를 당당하게 외쳤습니다. 의사가 그 순간 당당할 수 있었던 이유는 무엇일까요?",
-                "middle": "안중근 의사가 자신을 단순한 테러리스트나 암살자가 아닌 '대한국 의군 참모중장'이자 '전쟁 포로'로 대우할 것을 당당히 요구한 것은 국제법 및 독립운동사에서 어떤 역사적 의의를 지닐까요?",
-                "high": "안중근 의사가 뤼순 감옥에서 주창한 《동양평화론》의 핵심 사상을 분석해 보고, 오늘날 군비 경쟁과 영토 분쟁이 지속되는 동북아시아의 평화 공존을 위해 이 사상을 어떻게 계승·적용할 수 있을지 비판적으로 논술해 봅시다.",
-                "quiz_blanks": [
-                    "안중근 의사가 1909년 10월 26일 침략의 원흉 이토 히로부미를 처단한 역사적 장소는 중국 동북부의 ( ____________ ) 역입니다.",
-                    "안중근 의사가 11명의 동지들과 함께 왼손 넷째 손가락을 자르고 피로써 조국 독립을 맹세한 결사 조직은 ( ____________ ) 입니다.",
-                    "안중근 의사가 뤼순 옥중에서 집필하며 한·중·일 동양 3국의 공동 평화와 대등한 번영을 구상한 미완의 저서는 《 ( ____________ ) 》입니다."
-                ],
-                "essay": "만약 내가 1910년 뤼순 일본 관동도독부 법정에 선 안중근 의사의 변호인이었다면, 재판관들에게 안중근 의사의 거사에 대해 어떠한 법리적·역사적 변론을 펼쳤을지 서술해 보세요."
-            },
-            "윤봉길": {
-                "background": (
-                    "1930년대 초, 일제가 만주사변과 상하이 사변을 잇따라 일으키며 대륙 침략을 노골화하던 시기, 대한민국 임시정부는 일제의 탄압과 재정난으로 침체기에 빠져 있었습니다. "
-                    "고향 예산에서 농촌 계몽 운동에 힘쓰다 망명한 청년 윤봉길 의사는 김구 선생의 한인애국단에 입단하여, 1932년 4월 29일 상하이 훙커우 공원의 일왕 생일 및 전승 기념식장에 폭탄을 투척하였습니다. "
-                    "이 거사는 일본 군부 수뇌부를 처단하고 침체되었던 임시정부의 활로를 열었으며, "
-                    "중국 국민당 장제스 총통이 '중국의 100만 대군도 하지 못한 일을 조선의 한 청년이 해냈다'고 격찬하며 임시정부를 전폭 지원하는 결정적 계기를 마련했습니다."
-                ),
-                "elementary": "윤봉길 의사는 어린 두 아들에게 '피가 있고 뼈가 있다면 반드시 조선을 위해 용감한 투사가 되어라'라는 유서를 남겼습니다. 자신의 목숨보다 나라를 먼저 생각했던 의사의 마음에 대해 이야기해 봅시다.",
-                "middle": "훙커우 공원 거사에서 던진 물통 폭탄과 자결용 도시락 폭탄의 의미를 되새겨보고, 이 거사가 침체되어 있던 대한민국 임시정부와 한·중 연합 전선 형성에 미친 구체적 파급효과에 대해 토론해 봅시다.",
-                "high": "농촌 계몽 운동(부흥원, 월진회)을 통해 실력 양성에 힘쓰던 윤봉길 의사가 마침내 무장 의열 투쟁이라는 길을 선택하게 된 시대적 배경을 비판적으로 검토하고, 목적을 위한 실천 방식의 변화가 갖는 역사적 의미를 논술해 봅시다.",
-                "quiz_blanks": [
-                    "윤봉길 의사가 1932년 4월 29일 일제 수뇌부를 향해 폭탄을 투척한 상하이의 공원 명칭은 ( ____________ ) 공원(현 루쉰 공원)입니다.",
-                    "백범 김구 선생이 창설하여 윤봉길 의사와 이봉창 의사 등이 결사대로 활약한 대한민국 임시정부 산하 특무 조직은 ( ____________ ) 입니다.",
-                    "윤봉길 의사가 고향 충남 예산에서 청년들을 계몽하고 농촌 부흥을 이끌기 위해 창립했던 농민 운동 단체는 ( ____________ ) 회입니다."
-                ],
-                "essay": "만약 내가 25세 청년 윤봉길이었다면, 가족과의 평온한 일상과 조국의 독립이라는 거대한 갈림길 앞에서 어떤 고뇌와 선택을 내렸을지 솔직한 생각을 서술해 보세요."
-            }
-        }
+if st.sidebar.button("📝 교사용 활동지 생성", use_container_width=True):
+    open_worksheet_dialog(char_name, char_data)
 
-        p = profiles.get(char_name, {
-            "background": f"{char_name} 선생은 일제의 가혹한 침탈에 맞서 조국의 자주독립과 민족의 존엄을 지키기 위해 일생을 바치셨습니다. {char_data['fact']} 선생의 고결한 희생정신과 실천적 용기는 우리 역사의 든든한 초석이 되었습니다.",
-            "elementary": f"{char_name} 선생이 조국을 위해 실천한 가장 대표적인 행동은 무엇이며, 그 행동에서 무엇을 느낄 수 있나요?",
-            "middle": f"{char_name} 선생이 활동하던 시대의 어려움 속에서 내린 선택이 당시 민족사회에 미친 파급효과에 대해 토론해 봅시다.",
-            "high": f"{char_name} 선생의 생애와 사상을 현대 사회가 직면한 갈등과 과제에 비추어 비판적으로 고찰해 보고, 오늘날 우리가 계승해야 할 핵심 가치는 무엇인지 논술해 봅시다.",
-            "quiz_blanks": [
-                f"{char_name} 선생의 주요 활동과 관련된 역사적 연도와 장소를 사료를 통해 찾아보세요: ( ____________ )",
-                f"{char_name} 선생이 가담하거나 이끌었던 독립운동 조직의 명칭은 무엇인가요? ( ____________ )",
-                f"{char_name} 선생이 평생을 바쳐 지키고자 했던 핵심 역사적 가치는 무엇인가요? ( ____________ )"
-            ],
-            "essay": f"만약 내가 {char_name} 선생이 살았던 격동의 시대에 태어났다면, 나라와 민족의 위기 앞에서 어떤 선택을 했을지 서술해 보세요."
-        })
-
-        doc = []
-        doc.append(f"## [{char_name}과 함께하는 역사 깊이 읽기]\n")
-        doc.append(f"**| 일시:** 202&nbsp;&nbsp;년 &nbsp;&nbsp;&nbsp;&nbsp;월 &nbsp;&nbsp;&nbsp;&nbsp;일 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 학년/반:** &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 이름:** &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **| 학습 인물:** {char_name} 의사/열사\n")
-        doc.append("---\n")
-
-        doc.append("### 1. 짚어보기 (핵심 역사 배경 요약)")
-        doc.append(f"> {p['background']}\n")
-
-        doc.append("### 2. 수준별 토론 및 생각 나누기 (Discussion)")
-        doc.append(f"- **[초등학생 수준]** {p['elementary']}")
-        doc.append("  - ✍️ *나의 생각:* _____________________________________________________________________________________\n")
-        doc.append(f"- **[중학생 수준]** {p['middle']}")
-        doc.append("  - ✍️ *나의 생각:* _____________________________________________________________________________________\n")
-        doc.append(f"- **[고등학생 수준]** {p['high']}")
-        doc.append("  - ✍️ *나의 생각:* _____________________________________________________________________________________\n")
-
-        doc.append("### 3. 정밀 분석: 사료 및 팩트 퀴즈 (Quiz)")
-        doc.append(f"1. {p['quiz_blanks'][0]}")
-        doc.append(f"2. {p['quiz_blanks'][1]}")
-        doc.append(f"3. {p['quiz_blanks'][2]}")
-        doc.append(f"4. **[서술형 퀴즈]** {p['essay']}")
-        doc.append("   - ✍️ *서술 답안:* _____________________________________________________________________________________\n")
-
-        doc.append("### 4. 나만의 역사 한 줄 평 & 메타인지 (Reflection)")
-        doc.append(f"- **오늘 대화한 내용을 바탕으로 {char_name} 님에게 보내는 한 줄 평:**")
-        doc.append("  > [                                                                                               ]")
-        doc.append("- **내가 느낀 점을 서술하는 메타인지 기록장:**")
-        doc.append("  - *오늘 대화를 통해 새롭게 깨달은 역사적 사실:* __________________________________________________")
-        doc.append("  - *선생의 삶이 현대의 나에게 주는 교훈과 다짐:* __________________________________________________\n")
-
-        doc.append("---\n")
-        doc.append(f"🔗 **[사료 근거 및 원문 확인하기]({char_data['url']})** (대한민국역사박물관 오픈아카이브)")
-
-        return "\n".join(doc)
-
-    worksheet_md = generate_worksheet(msgs, char_name, char_data)
-    st.subheader("📝 교사용 수업 활동지")
-    st.markdown(worksheet_md)
-    st.download_button(
-        label="활동지 다운로드 (.md)",
-        data=worksheet_md,
-        file_name=f"{char_name}_worksheet.md",
-        mime="text/markdown",
-    )
-
+# 다이얼로그 미지원 구버전 환경을 위한 안전 폴백
+if st.session_state.get("show_worksheet_dialog", False):
+    with st.expander("📝 [팝업창] 교사용 수업 활동지", expanded=True):
+        ws_md = generate_worksheet_markdown(char_name, char_data)
+        st.markdown(ws_md)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.download_button("📥 마크다운 (.md)", ws_md, f"{char_name}_worksheet.md", "text/markdown", use_container_width=True)
+        with c2:
+            pdf_bytes = generate_worksheet_pdf(char_name, char_data)
+            if pdf_bytes:
+                st.download_button("📄 PDF (.pdf)", pdf_bytes, f"{char_name}_worksheet.pdf", "application/pdf", use_container_width=True)
+        if st.button("❌ 닫기"):
+            st.session_state["show_worksheet_dialog"] = False
+            st.rerun()
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🧹 대화 내용 초기화", use_container_width=True):
