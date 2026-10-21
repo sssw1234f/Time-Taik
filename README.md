@@ -34,7 +34,7 @@ streamlit run app.py
 
 ---
 
-## 🎯 심사위원 시연 가이드 (Key Demo Features)
+## 🎯 핵심 기능 시연 가이드 (Key Demo Features)
 
 1. **💡 원클릭 질문 프리셋 (Demo Presets)**
    - 타이핑 없이 인물 소개 하단의 **추천 질문 칩 버튼**을 클릭하여 즉시 시연할 수 있습니다.

@@ -30,7 +30,7 @@ knowledge_base = {
     }
 }
 
-# 심사위원 및 학습자용 원클릭 질문 프리셋 (인물별 3가지 핵심 질문)
+# 학습자용 원클릭 질문 프리셋 (인물별 3가지 핵심 질문)
 PRESET_QUESTIONS = {
     "유관순": [
         "📢 아우내 장터 만세 운동 당시의 상황을 들려주세요.",
@@ -687,7 +687,7 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
     """
     api_keys = get_gemini_api_keys()
     
-    # API 키가 전혀 없는 경우 시연용 기본 역사 응답 제공 (심사위원 데모 크래시 방지)
+    # API 키가 전혀 없는 경우 시연용 기본 역사 응답 제공 (데모 크래시 방지)
     if not api_keys:
         fallback_answers = {
             "유관순": "아우내 장터 만세 운동은 1919년 4월 1일 수천 명의 동포들과 함께 조국의 자주독립을 외친 거룩한 외침이었어요. 태극기를 품에 안고 대한독립 만세를 외치던 그 순간의 함성은 결코 잊을 수 없습니다. 비록 옥에 갇혔지만 우리의 자주정신은 결코 가둘 수 없답니다.\n\n[시각자료_검색어: 탑골공원]",
@@ -800,9 +800,9 @@ for message in st.session_state.messages:
         elif message.get("show_fallback"):
             st.caption("ℹ️ 관련 시각 자료 없음 (일치하는 공인 사료 사진 없음)")
 
-# [6. 심사위원용 원클릭 질문 프리셋 (Tag / Chip UI)]
+# [6. 학습자용 원클릭 추천 질문 (Tag / Chip UI)]
 st.markdown("---")
-st.markdown("💡 **심사위원 & 학습자 추천 질문 프리셋** *(원클릭 자동 실행)*")
+st.markdown("💡 **추천 질문** *(클릭 시 바로 질문)*")
 preset_cols = st.columns(3)
 selected_preset = None
 
@@ -824,7 +824,7 @@ if active_prompt:
 
     # 2. 어시스턴트 메시지 (단계별 로딩 피드백 + 실시간 스트리밍 답변)
     with st.chat_message("assistant"):
-        # 심사위원이 멈췄다고 느끼지 않도록 단계별 진행 상태 표시
+        # 사용자가 멈췄다고 느끼지 않도록 단계별 진행 상태 표시
         with st.status(f"📜 {char_name} 님의 사료 검증 및 답변 작성 중...", expanded=True) as status_box:
             st.write("1️⃣ 역사적 페르소나 및 아카이브 데이터 조회 중...")
             response_text, target_keyword = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
