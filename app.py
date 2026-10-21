@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import io
+import time
 import urllib.request
 import urllib.parse
 import json
@@ -29,9 +30,28 @@ knowledge_base = {
     }
 }
 
+# 심사위원 및 학습자용 원클릭 질문 프리셋 (인물별 3가지 핵심 질문)
+PRESET_QUESTIONS = {
+    "유관순": [
+        "📢 아우내 장터 만세 운동 당시의 상황을 들려주세요.",
+        "🇰🇷 직접 태극기를 만들어 배포하셨을 때 어떤 심정이셨나요?",
+        "⛓️ 서대문형무소 옥중에서도 만세를 멈추지 않으신 이유는 무엇인가요?"
+    ],
+    "안중근": [
+        "🎯 하얼빈 역에서 이토 히로부미를 처단하신 이유가 무엇입니까?",
+        "🤝 단지동맹(손가락 절단) 결성 당시의 결의를 말씀해 주세요.",
+        "🕊️ 옥중에서 집필하신 《동양평화론》의 핵심 정신은 무엇인가요?"
+    ],
+    "윤봉길": [
+        "💣 훙커우 공원 거사를 결심하게 된 계기는 무엇이었나요?",
+        "🍱 물통 폭탄과 도시락 폭탄은 각각 어떤 용도였습니까?",
+        "✉️ 떠나기 전 두 어린 아들에게 남기신 유언의 뜻을 알려주세요."
+    ]
+}
+
 # [.env 로컬 파일 자동 로드 헬퍼]
 def load_env_file():
-    for env_path in [".env", "../.env"]:
+    for env_path in [".env", "../.env", "Time-Taik-main/.env"]:
         if os.path.exists(env_path):
             try:
                 with open(env_path, "r", encoding="utf-8") as f:
@@ -97,8 +117,68 @@ def get_gemini_api_keys():
 
     return keys
 
-# [2. UI 설정]
-st.set_page_config(page_title="타임톡(Time-Talk)", page_icon="📜")
+# [2. UI 설정 & 반응형 스타일링]
+st.set_page_config(
+    page_title="타임톡(Time-Talk) - 역사 AI 페르소나",
+    page_icon="📜",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+# 모바일 뷰포트 최적화, 줄바꿈(keep-all) 및 불필요한 스크롤바 제거 CSS
+st.markdown("""
+<style>
+/* 한글 단어 줄바꿈 및 메시지 박스 가독성 최적화 */
+.stChatMessage, .stMarkdown, p, div {
+    word-break: keep-all;
+    overflow-wrap: break-word;
+}
+
+/* 프리셋 칩 버튼 스타일링 */
+div[data-testid="stHorizontalBlock"] button[kind="secondary"] {
+    border-radius: 18px;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.82rem;
+    font-weight: 500;
+    border: 1px solid #d1d5db;
+    background-color: #f9fafb;
+    color: #1f2937;
+    transition: all 0.2s ease-in-out;
+    white-space: normal;
+    height: auto;
+    min-height: 2.4rem;
+}
+
+div[data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
+    border-color: #3b82f6;
+    color: #1d4ed8;
+    background-color: #eff6ff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.15);
+}
+
+/* 프로필 배지 및 카드 가독성 */
+.hero-card {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* 사이드바 여백 정리 */
+section[data-testid="stSidebar"] .block-container {
+    padding-top: 1.2rem;
+    padding-bottom: 2rem;
+}
+
+/* 부드러운 스크롤 */
+html {
+    scroll-behavior: smooth;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("📜 타임톡(Time-Talk)")
 st.caption("대한민국역사박물관 오픈아카이브 데이터 기반 AI 페르소나 챗봇")
 
@@ -117,9 +197,10 @@ elif len(current_keys) == 1:
         key2_in = st.text_input("보조 API 키 (Key #2):", type="password", placeholder="AIzaSy...", key="sub_key_in")
         if key2_in and st.button("보조 키 등록", key="btn_sub_save"):
             st.session_state["user_gemini_key_2"] = key2_in
+            st.toast("✅ 보조 API 키가 성공적으로 등록되었습니다!", icon="🔑")
             st.rerun()
 else:
-    st.sidebar.error("🔴 Gemini API 키 미등록")
+    st.sidebar.warning("🔴 Gemini API 키 미등록 (체험 모드)")
     with st.sidebar.expander("🔑 API 키 직접 등록", expanded=True):
         key1_in = st.text_input("기본 API 키 (Key #1):", type="password", placeholder="AIzaSy...", key="key1_in")
         key2_in = st.text_input("보조 API 키 (Key #2 - 권장):", type="password", placeholder="AIzaSy...", key="key2_in")
@@ -128,6 +209,7 @@ else:
                 st.session_state["user_gemini_key_1"] = key1_in
             if key2_in:
                 st.session_state["user_gemini_key_2"] = key2_in
+            st.toast("✅ API 키가 저장되었습니다!", icon="🔑")
             st.rerun()
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
@@ -240,6 +322,7 @@ def generate_worksheet_markdown(char_name, char_data):
     ]
     return "\n".join(doc)
 
+@st.cache_resource(show_spinner=False)
 def get_korean_font_path():
     candidates = [
         "C:/Windows/Fonts/malgun.ttf",
@@ -374,7 +457,6 @@ def generate_worksheet_pdf(char_name, char_data):
         doc.build(story)
         return buffer.getvalue()
     except Exception as e:
-        print(f"PDF creation failed: {e}")
         return None
 
 # 모달 다이얼로그 함수 정의 (Streamlit dialog 기능 활용)
@@ -460,28 +542,30 @@ if st.session_state.get("show_worksheet_dialog", False):
 st.sidebar.markdown("---")
 if st.sidebar.button("🧹 대화 내용 초기화", use_container_width=True):
     st.session_state.messages = []
+    st.toast("대화 기록이 초기화되었습니다.", icon="🧹")
     st.rerun()
 
-# 사이드바 하단 여백 및 공공누리(공공데이터 오픈) 이미지
-st.sidebar.markdown("<div style='height: 350px;'></div>", unsafe_allow_html=True)
+# 사이드바 공공누리(공공데이터 오픈) 이미지 및 안내
+st.sidebar.markdown("---")
 try:
     if os.path.exists("img_opentype09.png"):
-        st.sidebar.image("img_opentype09.png", width=160)
+        st.sidebar.image("img_opentype09.png", width=140, caption="공공누리 제1유형: 출처표시")
 except Exception:
     pass
 
-# 메인 UI 출력
-col1, col2 = st.columns([1, 2])
+# 메인 인물 소개 카드 UI 출력
+col1, col2 = st.columns([1, 2.2], gap="medium")
 with col1:
     try:
         st.image(char_data["img"], use_container_width=True)
     except Exception:
-        st.warning("이미지 파일을 확인하세요.")
+        st.warning(f"📷 {char_name} 이미지 로딩 중")
 with col2:
     st.write(f"### {char_name} 의사/열사")
     st.info(f"**학습 페르소나:** {char_data['persona']}")
+    st.caption(f"**기본 사료:** {char_data['fact']}")
 
-# [3. 위키미디어(Wikimedia) REST API 연동 및 엄격 검증 함수]
+# [3. 위키미디어(Wikimedia) REST API 연동 및 엄격 검증 함수 - 캐싱 적용]
 WIKI_HEADERS = {
     "User-Agent": "TimeTalkBot/1.0 (Educational Project; mailto:history@timetalk.org)"
 }
@@ -504,11 +588,12 @@ def is_valid_historical_image(url, title, description):
             return False
     return True
 
+@st.cache_data(show_spinner=False, ttl=3600)
 def search_wikimedia_image_strict(keyword):
     """
-    LLM이 추출한 단일 핵심 키워드(명사 1~2개)로만 위키미디어를 검색하고,
+    LLM이 추출한 단일 핵심 키워드로 위키미디어를 검색하고,
     키워드와 제목이 일치하는 신뢰도 높은 사료 이미지만 선별.
-    일치하는 결과가 없거나 연관성이 낮으면 안전장치(None)로 Fallback.
+    캐싱(TTL 1시간)을 통해 반복 호출 방지 및 초고속 응답 보장.
     """
     if not keyword:
         return None
@@ -537,7 +622,7 @@ def search_wikimedia_image_strict(keyword):
                 if not is_valid_historical_image(raw_url, page_title, desc):
                     continue
 
-                # 키워드와 페이지 제목의 일치성 검증 (제목이나 키워드에 상호 포함)
+                # 키워드와 페이지 제목의 일치성 검증 (상호 포함)
                 norm_kw = re.sub(r"[\s\-_·]", "", cleaned_kw)
                 norm_title = re.sub(r"[\s\-_·]", "", page_title)
                 if norm_kw not in norm_title and norm_title not in norm_kw:
@@ -601,9 +686,23 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
     반환: (clean_response_text, extracted_keyword)
     """
     api_keys = get_gemini_api_keys()
+    
+    # API 키가 전혀 없는 경우 시연용 기본 역사 응답 제공 (심사위원 데모 크래시 방지)
     if not api_keys:
-        err_msg = f"[{char_name}의 답변] : Gemini API 키가 설정되지 않았습니다. 왼쪽 사이드바에 API 키를 입력하거나 .env 또는 Streamlit Secrets에 등록해주세요."
-        return err_msg, None
+        fallback_answers = {
+            "유관순": "아우내 장터 만세 운동은 1919년 4월 1일 수천 명의 동포들과 함께 조국의 자주독립을 외친 거룩한 외침이었어요. 태극기를 품에 안고 대한독립 만세를 외치던 그 순간의 함성은 결코 잊을 수 없습니다. 비록 옥에 갇혔지만 우리의 자주정신은 결코 가둘 수 없답니다.\n\n[시각자료_검색어: 탑골공원]",
+            "안중근": "하얼빈 역의 총성은 단순한 살상이 아닌, 대한국 의군 참모중장의 자격으로 동양의 평화를 짓밟은 침략의 원흉을 단죄한 것이오. 뤼순 옥중에서도 한·중·일 세 나라가 대등하게 평화를 이루는 《동양평화론》을 저술하였소. 조국의 온전한 독립이야말로 동양 평화의 시작이오.\n\n[시각자료_검색어: 하얼빈역]",
+            "윤봉길": "1932년 4월 29일 상하이 훙커우 공원에서 던진 폭탄은 우리 민족이 살아있음을 세계만방에 알린 불꽃이었습니다! 청년들이 깨어나 실력을 기르고 정의를 위해 실천할 때 비로소 나라를 되찾을 수 있습니다. 피와 뼈가 있다면 용감한 투사가 되어 조국을 지킵시다!\n\n[시각자료_검색어: 루쉰공원]"
+        }
+        raw_text = fallback_answers.get(char_name, f"저는 {char_name}입니다. 조국의 독립을 향한 우리의 열망은 역사 속에 영원히 살아있습니다.\n\n[시각자료_검색어: 독립문]")
+        target_kw = None
+        kw_match = re.search(r"\[시각자료_검색어:\s*([^\]]+)\]", raw_text)
+        if kw_match:
+            target_kw = kw_match.group(1).strip()
+            clean_text = re.sub(r"\[시각자료_검색어:\s*[^\]]+\]", "", raw_text).strip()
+        else:
+            clean_text = raw_text.strip()
+        return f"[데모 모드] {clean_text}", target_kw
 
     system_instruction = (
         f"당신은 대한민국의 역사 인물 '{char_name}'입니다. {char_data['persona']}\n"
@@ -631,13 +730,9 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
 
     # 🔄 [Key Failover 루프]
     for key_idx, api_key in enumerate(api_keys, start=1):
-        masked_key = f"{api_key[:6]}...{api_key[-4:]}" if len(api_key) > 10 else "***"
-        print(f"[Gemini API] 시도 중: Key #{key_idx}/{total_keys} ({masked_key})")
-
         try:
             genai.configure(api_key=api_key)
         except Exception as config_err:
-            print(f"[Gemini API Config Error] Key #{key_idx} 설정 오류: {config_err}")
             last_error = str(config_err)
             continue
 
@@ -658,10 +753,6 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
                     raw_text = response.candidates[0].content.parts[0].text
 
                 if raw_text and raw_text.strip():
-                    if key_idx > 1:
-                        print(f"✅ [Failover Success] Key #{key_idx}로 자동 전환 후 [{model_name}] 모델 답변 생성 성공!")
-
-                    # 키워드 태그 정규식 파싱
                     target_kw = None
                     kw_match = re.search(r"\[시각자료_검색어:\s*([^\]]+)\]", raw_text)
                     if kw_match:
@@ -678,25 +769,23 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
                 last_error = err_str
                 if any(q in err_str.lower() for q in ["429", "quota", "resourceexhausted", "rate limit", "ratelimit"]):
                     key_hit_quota = True
-                    print(f"⚠️ [Quota Limit Detected] Key #{key_idx} 할당량 초과 ({model_name}): {err_str[:60]}")
                     break
                 continue
 
         if key_hit_quota and key_idx < total_keys:
-            print(f"🔄 [Failover Triggered] Key #{key_idx} 할당량 초과 -> 보조 Key #{key_idx+1}로 자동 전환 재시도")
             continue
 
     if any(q in last_error.lower() for q in ["429", "quota", "resourceexhausted", "rate limit"]):
-        err_msg = f"[{char_name}의 답변] : 구글 무료 계정의 요청 할당량(Quota)이 일시적으로 초과되었습니다. (등록된 {total_keys}개의 API 키 모두 소진) 약 20~30초 후에 다시 질문을 입력해 주세요."
+        err_msg = f"[{char_name}의 답변] : 구글 무료 요청 할당량이 일시적으로 초과되었습니다. 잠시 후 다시 질문해 주세요."
     else:
-        err_msg = f"[{char_name}의 답변] : API 오류 발생: {last_error}"
+        err_msg = f"[{char_name}의 답변] : 일시적인 통신 오류가 발생했습니다. 다시 시도해 주세요."
     return err_msg, None
 
 # [5. 대화 세션 및 UI 렌더링 동기화]
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 기존 대화 기록 출력 (사료 이미지 또는 Fallback 안내)
+# 기존 대화 기록 출력
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -711,27 +800,54 @@ for message in st.session_state.messages:
         elif message.get("show_fallback"):
             st.caption("ℹ️ 관련 시각 자료 없음 (일치하는 공인 사료 사진 없음)")
 
-# 질문 입력 및 응답 생성
-if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요!"):
+# [6. 심사위원용 원클릭 질문 프리셋 (Tag / Chip UI)]
+st.markdown("---")
+st.markdown("💡 **심사위원 & 학습자 추천 질문 프리셋** *(원클릭 자동 실행)*")
+preset_cols = st.columns(3)
+selected_preset = None
+
+current_presets = PRESET_QUESTIONS.get(char_name, [])
+for idx, q_txt in enumerate(current_presets):
+    with preset_cols[idx]:
+        if st.button(q_txt, key=f"chip_{char_name}_{idx}", use_container_width=True):
+            selected_preset = q_txt
+
+# 질문 입력창 및 프리셋 트리거 통합
+chat_input_val = st.chat_input(f"{char_name} 님께 질문할 내용을 입력하세요...")
+active_prompt = chat_input_val or selected_preset or st.session_state.pop("pending_prompt", None)
+
+if active_prompt:
     # 1. 사용자 질문 렌더링 & 세션 저장
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": active_prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(active_prompt)
 
-    # 2. 어시스턴트 메시지 (답변 생성 + 타겟 키워드 검색 + 실시간 동기화)
+    # 2. 어시스턴트 메시지 (단계별 로딩 피드백 + 실시간 스트리밍 답변)
     with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        with st.spinner(f"{char_name} 님이 답변을 작성하고 시각 자료를 검증하고 있습니다..."):
-            response_text, target_keyword = get_persona_answer_with_keyword(char_name, prompt, char_data)
+        # 심사위원이 멈췄다고 느끼지 않도록 단계별 진행 상태 표시
+        with st.status(f"📜 {char_name} 님의 사료 검증 및 답변 작성 중...", expanded=True) as status_box:
+            st.write("1️⃣ 역사적 페르소나 및 아카이브 데이터 조회 중...")
+            response_text, target_keyword = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
             
-            # 타겟 키워드로 엄격한 위키미디어 검색 수행
+            st.write("2️⃣ 답변 맥락 기반 공인 역사 사료(Wikimedia) 탐색 중...")
             wiki_image = search_wikimedia_image_strict(target_keyword) if target_keyword else None
+            
             full_response = f"{response_text}\n\n🔗 [박물관 오픈아카이브 원문]({char_data['url']})"
+            status_box.update(label=f"✅ {char_name} 님의 답변 준비 완료!", state="complete", expanded=False)
 
-        # 답변 텍스트 즉시 렌더링
-        message_placeholder.markdown(full_response)
+        # 텍스트 스트리밍 타이핑 효과로 생동감 제공
+        def text_stream_generator(text):
+            words = text.split(" ")
+            for i, word in enumerate(words):
+                yield word + (" " if i < len(words) - 1 else "")
+                time.sleep(0.015)
 
-        # 이미지 또는 Fallback 안전장치 렌더링
+        if hasattr(st, "write_stream"):
+            st.write_stream(text_stream_generator(full_response))
+        else:
+            st.markdown(full_response)
+
+        # 사료 이미지 또는 폴백 렌더링
         msg_record = {"role": "assistant", "content": full_response}
         if wiki_image:
             st.image(
@@ -745,5 +861,5 @@ if prompt := st.chat_input("역사에 대해 궁금한 점을 질문해보세요
             st.caption("ℹ️ 관련 시각 자료 없음 (일치하는 공인 사료 사진 없음)")
             msg_record["show_fallback"] = True
 
-    # 세션 상태에 저장하여 새로고침 시에도 동일하게 동기화 유지
+    # 세션에 최종 저장하여 새로고침 시에도 유지
     st.session_state.messages.append(msg_record)
