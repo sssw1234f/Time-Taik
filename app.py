@@ -7,6 +7,7 @@ import urllib.parse
 import json
 import re
 import google.generativeai as genai
+from qa_cache import get_cached_qa, save_cached_qa, get_cache_stats
 
 # [1. 데이터베이스] - 공공데이터를 딕셔너리로 구조화
 knowledge_base = {
@@ -211,6 +212,17 @@ else:
                 st.session_state["user_gemini_key_2"] = key2_in
             st.toast("✅ API 키가 저장되었습니다!", icon="🔑")
             st.rerun()
+
+# Q&A 지능형 캐시 상태 모니터링 (심사위원 어필용 메트릭)
+st.sidebar.markdown("---")
+st.sidebar.markdown("#### ⚡ Q&A 지능형 캐시 레이어")
+cache_stats = get_cache_stats()
+col_c1, col_c2 = st.sidebar.columns(2)
+with col_c1:
+    st.metric("저장된 Q&A", f"{cache_stats['total_items']}개")
+with col_c2:
+    st.metric("절약된 호출", f"{cache_stats['total_hits']}회")
+st.sidebar.caption("동일/유사 질의 시 LLM API 중복 호출을 차단하고 로컬 DB에서 0초 만에 응답합니다.")
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
 if "current_char" not in st.session_state:
@@ -789,6 +801,16 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if message.get("is_cached") is True:
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">⚡ 초고속 즉시 답변 (캐시 적용됨)</span></div>',
+                unsafe_allow_html=True
+            )
+        elif message.get("is_cached") is False:
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">🧠 실시간 AI 생성 완료 (DB 저장됨)</span></div>',
+                unsafe_allow_html=True
+            )
         if message.get("image_info"):
             img = message["image_info"]
             st.image(
@@ -822,18 +844,35 @@ if active_prompt:
     with st.chat_message("user"):
         st.markdown(active_prompt)
 
-    # 2. 어시스턴트 메시지 (단계별 로딩 피드백 + 실시간 스트리밍 답변)
+    # 2. 어시스턴트 메시지 (Cache-Aside 패턴 + 단계별 로딩 피드백 + 실시간 스트리밍)
     with st.chat_message("assistant"):
-        # 사용자가 멈췄다고 느끼지 않도록 단계별 진행 상태 표시
-        with st.status(f"📜 {char_name} 님의 사료 검증 및 답변 작성 중...", expanded=True) as status_box:
-            st.write("1️⃣ 역사적 페르소나 및 아카이브 데이터 조회 중...")
-            response_text, target_keyword = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
+        with st.status(f"📜 {char_name} 님의 사료 검증 및 답변 처리 중...", expanded=True) as status_box:
+            # 1. Cache Check: DB에 동일/유사 질의가 이미 존재하는지 먼저 조회
+            st.write("🔍 Q&A 캐시 데이터베이스 조회 중...")
+            cached_res = get_cached_qa(char_name, active_prompt)
+            
+            if cached_res:
+                response_text, target_keyword, hit_count = cached_res
+                is_cached = True
+                st.write(f"⚡ **[Cache HIT]** 기존 데이터베이스에서 답변을 즉시 호출했습니다. (누적 활용: {hit_count}회, API 지연시간 0초)")
+            else:
+                is_cached = False
+                st.write("1️⃣ **[Cache MISS]** 외부 LLM API(Gemini) 호출 및 페르소나 답변 생성 중...")
+                response_text, target_keyword = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
+                
+                # 에러성 메시지가 아닌 정상 답변인 경우 DB 캐시에 영속화
+                if response_text and not response_text.startswith(f"[{char_name}의 답변] :"):
+                    save_cached_qa(char_name, active_prompt, response_text, target_keyword)
+                    st.write("💾 신규 문답 쌍을 Q&A 캐시 DB에 안전하게 저장했습니다.")
             
             st.write("2️⃣ 답변 맥락 기반 공인 역사 사료(Wikimedia) 탐색 중...")
             wiki_image = search_wikimedia_image_strict(target_keyword) if target_keyword else None
             
             full_response = f"{response_text}\n\n🔗 [박물관 오픈아카이브 원문]({char_data['url']})"
-            status_box.update(label=f"✅ {char_name} 님의 답변 준비 완료!", state="complete", expanded=False)
+            if is_cached:
+                status_box.update(label=f"⚡ {char_name} 님의 답변 즉시 로드 완료! (Cache HIT)", state="complete", expanded=False)
+            else:
+                status_box.update(label=f"✅ {char_name} 님의 답변 준비 완료!", state="complete", expanded=False)
 
         # 텍스트 스트리밍 타이핑 효과로 생동감 제공
         def text_stream_generator(text):
@@ -847,8 +886,22 @@ if active_prompt:
         else:
             st.markdown(full_response)
 
+        # Q&A 캐싱 상태 뱃지 및 토스트 피드백 (공모전 심사위원 어필)
+        if is_cached:
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">⚡ 초고속 즉시 답변 (캐시 적용됨)</span></div>',
+                unsafe_allow_html=True
+            )
+            st.toast("⚡ 초고속 캐시 적중! 외부 API 호출 없이 로컬 DB에서 즉시 답변을 반환했습니다.", icon="⚡")
+        else:
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">🧠 실시간 AI 생성 완료 (DB 저장됨)</span></div>',
+                unsafe_allow_html=True
+            )
+            st.toast("🧠 실시간 AI 생성 완료! 새로운 질문-답변이 캐시 DB에 저장되었습니다.", icon="🧠")
+
         # 사료 이미지 또는 폴백 렌더링
-        msg_record = {"role": "assistant", "content": full_response}
+        msg_record = {"role": "assistant", "content": full_response, "is_cached": is_cached}
         if wiki_image:
             st.image(
                 wiki_image["image_url"],
