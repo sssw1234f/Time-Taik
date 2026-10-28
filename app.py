@@ -730,11 +730,9 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
     )
 
     candidate_models = [
-        "gemini-2.0-flash",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-2.5-flash",
-        "gemini-flash-latest"
+        "gemini-2.0-flash",
+        "gemini-1.5-pro"
     ]
 
     total_keys = len(api_keys)
@@ -852,9 +850,10 @@ if active_prompt:
             cached_res = get_cached_qa(char_name, active_prompt)
             
             if cached_res:
-                response_text, target_keyword, hit_count = cached_res
+                response_text, target_keyword, hit_count, match_type = cached_res
                 is_cached = True
-                st.write(f"⚡ **[Cache HIT]** 기존 데이터베이스에서 답변을 즉시 호출했습니다. (누적 활용: {hit_count}회, API 지연시간 0초)")
+                type_desc = "완전 일치" if match_type == "exact" else "유사 질문 자동 식별"
+                st.write(f"⚡ **[Cache HIT: {type_desc}]** 기존 데이터베이스에서 답변을 즉시 호출했습니다. (누적 활용: {hit_count}회, API 지연시간 0초)")
             else:
                 is_cached = False
                 st.write("1️⃣ **[Cache MISS]** 외부 LLM API(Gemini) 호출 및 페르소나 답변 생성 중...")
