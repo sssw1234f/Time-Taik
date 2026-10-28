@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Q&A 지능형 캐싱 시스템 모듈 (Theme Anchor + Hybrid Similarity + Cache-Aside)
-SQLite 데이터베이스를 활용하여 동일하거나 유사한 질문에 대해 외부 LLM API 중복 호출을 방지하고 즉시 응답을 반환합니다.
+Q&A 지능형 캐싱 시스템 모듈 (Intent-Aware Semantic Matching & Cache-Aside)
+SQLite 데이터베이스를 활용하여 동일/유사 질문에 대해 LLM API 중복 호출을 방지하되,
+새로운 의도(사진, 모형, 장소, 원리 등)를 가진 질문은 정밀하게 구분하여 실시간 AI로 전달합니다.
 """
 
 import os
@@ -11,44 +12,40 @@ import difflib
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "qa_cache.db")
 
-# 한국어 조사 분리 패턴
+# 한국어 조사 및 용언 어미 분리 정규식
 JOSA_PATTERN = re.compile(r'(?:에서|에게|으로|로|이랑|보다|까지|부터|이나|나|은|는|이|가|을|를|의|에|와|과|도)$')
+VERB_STEM_PATTERN = re.compile(r'(?:이셨나요|이셨|이신|셨나요|셨|시|냐|하신|하셨|했|하|할|한|되|된|될|보는|볼|보|받은|당한)?$')
 
-# 인물별 3대 핵심 역사 테마 앵커 (유사 질문 매칭 정확도 100% 보장)
-THEME_ANCHORS = {
-    "유관순": [
-        ({"아우내", "장터", "아우내장터"}, "📢 아우내 장터 만세 운동 당시의 상황을 들려주세요."),
-        ({"태극기"}, "🇰🇷 직접 태극기를 만들어 배포하셨을 때 어떤 심정이셨나요?"),
-        ({"서대문", "형무소", "옥중"}, "⛓️ 서대문형무소 옥중에서도 만세를 멈추지 않으신 이유는 무엇인가요?")
-    ],
-    "안중근": [
-        ({"하얼빈", "이토", "히로부미", "처단", "저격"}, "🎯 하얼빈 역에서 이토 히로부미를 처단하신 이유가 무엇입니까?"),
-        ({"단지동맹", "손가락", "절단", "동의단지회"}, "🤝 단지동맹(손가락 절단) 결성 당시의 결의를 말씀해 주세요."),
-        ({"동양평화론", "평화론"}, "🕊️ 옥중에서 집필하신 《동양평화론》의 핵심 정신은 무엇인가요?")
-    ],
-    "윤봉길": [
-        ({"훙커우", "홍커우", "루쉰", "상하이"}, "💣 훙커우 공원 거사를 결심하게 된 계기는 무엇이었나요?"),
-        ({"도시락", "물통", "폭탄"}, "🍱 물통 폭탄과 도시락 폭탄은 각각 어떤 용도였습니까?"),
-        ({"유언", "아들", "모순"}, "✉️ 떠나기 전 두 어린 아들에게 남기신 유언의 뜻을 알려주세요.")
-    ]
+# 질문의 의도를 완전히 바꾸는 차별화 속성 키워드군 (Intent Discriminators)
+# 이 단어들이 사용자 질문에 포함되어 있고 DB 질문에는 없다면, 캐시를 차단하고 실시간 AI로 분기
+INTENT_DISCRIMINATORS = {
+    '사진', '모형', '형태', '실제', '모습', '그림', '유물', '사료', '영상', '자료',
+    '누구', '어디', '장소', '위치', '크기', '무게', '원리', '제작자', '재료', '구조',
+    '언제', '시간', '사망', '사상자', '피해자', '비용', '돈', '현재',
+    '고문', '몇', '발', '총', '총기', '가족', '나이', '생일', '태어난', '결과'
+}
+
+STOPWORDS = {
+    "알려주", "설명해", "말씀해", "들려주", "이야기", "대해", "어떤", "무엇", "궁금", "생각",
+    "각각", "있나요", "있어", "있습니까", "뭐야", "뭔가요", "인가요", "어떠", "어떻"
 }
 
 
 def clean_korean_word(word: str) -> str:
-    """한국어 단어 끝에 붙은 조사/어미 제거"""
+    """한국어 단어에서 조사 및 용언 어미를 제거하여 어근(Stem) 추출"""
     if len(word) <= 1:
         return word
+    if word.startswith("만들") or word.startswith("만드"):
+        return "만들"
     w = JOSA_PATTERN.sub('', word)
+    w = VERB_STEM_PATTERN.sub('', w)
     return w if len(w) >= 2 else word
 
 
 def normalize_question(question: str) -> str:
     """
-    질문 전처리 및 정규화 (Normalization):
-    1. 소문자화 및 공백 정규화
-    2. 문두 이모지, 기호 제거
-    3. 문미 특수기호/문장부호 제거
-    4. 요청/종결 어미 정규화
+    질문 전처리 및 정규화:
+    - 소문자화, 공백 정규화, 특수기호/이모지 제거, 공통 종결 어미 제거
     """
     if not question:
         return ""
@@ -76,38 +73,52 @@ def normalize_question(question: str) -> str:
 
 
 def extract_keywords(text: str) -> set:
-    """텍스트에서 핵심 의미 명사 추출 (조사 트리밍 적용)"""
+    """텍스트에서 정규화된 핵심 의미 토큰 세트 추출"""
     text = re.sub(r"^[^\w가-힣]+", "", text)
     text = re.sub(r"[?!.,~^()]+", " ", text)
     words = re.findall(r"[가-힣a-zA-Z0-9]+", text.lower())
-    stopwords = {"알려주", "설명해", "말씀해", "들려주", "이야기", "대해", "어떤", "무엇", "궁금", "생각"}
     result = set()
     for raw in words:
         w = clean_korean_word(raw)
-        if len(w) >= 2 and w not in stopwords:
+        if len(w) >= 2 and w not in STOPWORDS:
             result.add(w)
     return result
 
 
-def calculate_similarity(q1: str, q2: str) -> float:
-    """하이브리드 유사도 계산 (자카드 + 문자열 시퀀스 + 오버랩 계수)"""
-    if not q1 or not q2:
-        return 0.0
-
-    if normalize_question(q1) == normalize_question(q2):
-        return 1.0
-
-    k1 = extract_keywords(q1)
-    k2 = extract_keywords(q2)
+def is_semantic_intent_match(q_user: str, q_db: str) -> tuple:
+    """
+    의도 인식 기반 정밀 유사도 매칭:
+    반환: (is_match: bool, score: float)
+    """
+    norm_u = normalize_question(q_user)
+    norm_d = normalize_question(q_db)
     
-    if not k1 or not k2:
-        return difflib.SequenceMatcher(None, normalize_question(q1), normalize_question(q2)).ratio()
+    if norm_u == norm_d:
+        return True, 1.0
 
-    jaccard = len(k1 & k2) / len(k1 | k2)
-    overlap = len(k1 & k2) / min(len(k1), len(k2))
-    seq = difflib.SequenceMatcher(None, normalize_question(q1), normalize_question(q2)).ratio()
+    k_user = extract_keywords(q_user)
+    k_db = extract_keywords(q_db)
+
+    if not k_user or not k_db:
+        return False, 0.0
+
+    intersection = k_user & k_db
+    diff_user = k_user - k_db
+
+    # 1. 의도 분별 필터: 사용자가 사진, 모형, 위치 등 DB에 없는 완전히 새로운 속성을 요구한 경우 즉시 차단
+    if diff_user & INTENT_DISCRIMINATORS:
+        return False, 0.0
+
+    # 2. 자카드 유사도 및 DB 키워드 포괄율(Coverage) 계산
+    jaccard = len(intersection) / len(k_user | k_db)
+    db_coverage = len(intersection) / len(k_db)
     
-    return max(jaccard, seq, overlap * 0.75)
+    # 3. 엄격한 매칭 조건:
+    # Jaccard가 0.50 이상이거나, DB 핵심 키워드의 70% 이상을 포함하면서 새로운 요구 단어가 1개 이하일 때만 매칭
+    is_match = (jaccard >= 0.50) or (db_coverage >= 0.70 and len(diff_user) <= 1)
+    score = max(jaccard, db_coverage)
+    
+    return is_match, score
 
 
 def get_db_connection():
@@ -146,7 +157,10 @@ def init_qa_cache_db():
 
 def get_cached_qa(char_name: str, question: str):
     """
-    지능형 Cache 조회 (Theme Anchor -> Exact Match -> Semantic Similarity Match):
+    의도 인식 기반 지능형 Cache 조회:
+    1단계: 정규화 완전 일치 검사 (O(1))
+    2단계: 의도 분별 필터 + 의미 유사도 정밀 검사
+    
     반환: (answer, target_keyword, hit_count, match_type) 또는 None
     match_type: 'exact' (완전 일치) 또는 'semantic' (유사 질문 매칭)
     """
@@ -159,7 +173,7 @@ def get_cached_qa(char_name: str, question: str):
         with get_db_connection() as conn:
             cursor = conn.cursor()
 
-            # [1단계: 완전 일치 검사]
+            # [1단계: 정규화 완전 일치 검사]
             cursor.execute("""
                 SELECT id, answer, target_keyword, hit_count
                 FROM qa_cache
@@ -175,26 +189,7 @@ def get_cached_qa(char_name: str, question: str):
                 conn.commit()
                 return answer, target_keyword, new_hit_count, "exact"
 
-            # [2단계: 테마 앵커(Theme Anchor) 기반 유사 질문 매칭 - 정확도 100%]
-            user_keywords = extract_keywords(question)
-            anchors = THEME_ANCHORS.get(char_name, [])
-            for anchor_set, target_orig_q in anchors:
-                if any(ak in kw or kw in ak for ak in anchor_set for kw in user_keywords):
-                    cursor.execute("""
-                        SELECT id, answer, target_keyword, hit_count
-                        FROM qa_cache
-                        WHERE char_name = ? AND original_question = ?
-                        LIMIT 1;
-                    """, (char_name, target_orig_q))
-                    a_row = cursor.fetchone()
-                    if a_row:
-                        a_id, answer, target_keyword, hit_count = a_row
-                        new_hit_count = (hit_count or 1) + 1
-                        cursor.execute("UPDATE qa_cache SET hit_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;", (new_hit_count, a_id))
-                        conn.commit()
-                        return answer, target_keyword, new_hit_count, "semantic"
-
-            # [3단계: 일반 Q&A 대상 하이브리드 유사도 분석]
+            # [2단계: 의도 분별 필터 + 의미 유사도 분석]
             cursor.execute("""
                 SELECT id, original_question, answer, target_keyword, hit_count
                 FROM qa_cache
@@ -206,12 +201,12 @@ def get_cached_qa(char_name: str, question: str):
             best_score = 0.0
 
             for cand_id, cand_orig, cand_ans, cand_kw, cand_hits in candidates:
-                sim = calculate_similarity(question, cand_orig)
-                if sim > best_score:
-                    best_score = sim
+                is_match, score = is_semantic_intent_match(question, cand_orig)
+                if is_match and score > best_score:
+                    best_score = score
                     best_match = (cand_id, cand_ans, cand_kw, cand_hits)
 
-            if best_match and best_score >= 0.50:
+            if best_match:
                 cand_id, answer, target_keyword, hit_count = best_match
                 new_hit_count = (hit_count or 1) + 1
                 cursor.execute("UPDATE qa_cache SET hit_count = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?;", (new_hit_count, cand_id))
