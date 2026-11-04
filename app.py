@@ -213,7 +213,7 @@ else:
             st.toast("✅ API 키가 저장되었습니다!", icon="🔑")
             st.rerun()
 
-# Q&A 지능형 캐시 상태 모니터링 (심사위원 어필용 메트릭)
+# Q&A 지능형 캐시 상태 모니터링
 st.sidebar.markdown("---")
 st.sidebar.markdown("#### ⚡ Q&A 지능형 캐시 레이어")
 cache_stats = get_cache_stats()
@@ -963,7 +963,7 @@ if active_prompt:
         else:
             st.markdown(full_response)
 
-        # Q&A 캐싱 상태 뱃지 및 토스트 피드백 (공모전 심사위원 어필)
+        # Q&A 캐싱 상태 뱃지 및 토스트 피드백
         if is_cached:
             st.markdown(
                 '<div style="margin: 6px 0;"><span style="background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">⚡ 초고속 즉시 답변 (캐시 적용됨)</span></div>',
