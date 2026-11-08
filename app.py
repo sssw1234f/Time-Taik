@@ -7,7 +7,7 @@ import urllib.parse
 import json
 import re
 import google.generativeai as genai
-from qa_cache import get_cached_qa, save_cached_qa, get_cache_stats
+from qa_cache import get_cached_qa, save_cached_qa, get_cache_stats, sanitize_and_reset_cache
 
 # [1. 데이터베이스] - 공공데이터를 딕셔너리로 구조화
 knowledge_base = {
@@ -223,6 +223,10 @@ with col_c1:
 with col_c2:
     st.metric("절약된 호출", f"{cache_stats['total_hits']}회")
 st.sidebar.caption("동일/유사 질의 시 LLM API 중복 호출을 차단하고 로컬 DB에서 0초 만에 응답합니다.")
+if st.sidebar.button("🧹 캐시 정제 (검증 프리셋만 유지)", key="btn_clean_cache", use_container_width=True):
+    sanitize_and_reset_cache()
+    st.toast("✅ 오염 데이터 정제 완료! 9대 표준 프리셋으로 안전하게 복원되었습니다.", icon="🧹")
+    st.rerun()
 
 # 페르소나 변경 시 이전 대화 내용 자동 초기화
 if "current_char" not in st.session_state:
@@ -695,13 +699,14 @@ def search_wikimedia_image_strict(keyword):
 def generate_contextual_persona_fallback(char_name, question, char_data):
     """
     외부 LLM API 호출 불가(키 오류, 쿼터 소진, 네트워크 지연) 시에도
-    질문 맥락을 분석하여 역사 사료 기반의 자연스러운 페르소나 답변 및 시각자료를 생성하는 3중 안전장치
+    질문 맥락을 분석하여 역사 사료 기반의 자연스러운 페르소나 답변 및 시각자료를 생성하는 3중 안전장치.
+    반환: (text, kw, is_llm=False, is_out_of_scope)
     """
     q = question.lower()
     
     # 범위 외(Out-of-Scope) 질문 키워드 감지 (날씨, 음식, 코딩, 연예 등)
     out_of_scope_keywords = [
-        "날씨", "비 오", "눈 오", "기온", "점심", "저녁", "아침", "메뉴", "밥", "식사", "배고파",
+        "날씨", "비 오", "눈 오", "기온", "점심", "저녁", "아침", "메뉴", "밥", "식사", "배고파", "맛집", "국밥",
         "코딩", "파이썬", "자바", "프로그래밍", "코드", "버그", "주식", "코인", "비트코인",
         "아이돌", "연예인", "노래", "영화", "드라마", "게임", "축구", "야구"
     ]
@@ -710,36 +715,57 @@ def generate_contextual_persona_fallback(char_name, question, char_data):
     if char_name == "유관순":
         if is_out_of_scope:
             text = (
-                "현대의 일상도 소중하지만, 지금은 빼앗긴 나라를 되찾기 위해 온 겨레가 피 흘렸던 그 날의 외침을 먼저 돌아보았으면 해요. "
+                "현대의 일상이나 소소한 잡담도 소중하지만, 지금은 빼앗긴 나라를 되찾기 위해 온 겨레가 피 흘렸던 그 날의 외침을 먼저 돌아보았으면 해요. "
                 "사소한 잡담에 마음을 두기보다 우리 조국을 지켜낸 숭고한 역사의 의미를 함께 나누어 보아요."
             )
             kw = "없음"
-        elif any(w in q for w in ["수의", "서대문형무소", "감옥", "수감", "고문", "벽돌"]):
+        elif any(w in q for w in ["이화", "학당", "학교", "공부", "학창", "어릴", "어린", "과목", "친구", "정동", "프라이", "선생님"]):
+            text = (
+                "저는 1916년 충남 천안에서 상경하여 선교사의 추천으로 정동 이화학당 보통과 3학년에 편입하였고, 이후 고등과에 진학해 신학문과 성경을 배웠어요. "
+                "프라이 선생님의 따뜻한 가르침 속에서 성실히 배우며 빼앗긴 조국의 현실에 눈뜨게 되었답니다. "
+                "이화학당 교정에서 친구들과 함께 꿈꾸었던 자주독립의 소망이 훗날 3·1 만세 운동의 굳건한 디딤돌이 되었어요."
+            )
+            kw = "유관순"
+        elif any(w in q for w in ["태극기", "만들", "배포", "그리", "인쇄"]):
+            text = (
+                "일제의 휴교령이 내려진 후 고향 천안으로 내려가 동포들의 손에 쥐여줄 태극기를 한 땀 한 땀 직접 그렸어요. "
+                "어두운 밤 등불 아래에서 밤을 새워 만든 태극기가 아우내 장터에 펄럭이던 그 날의 벅찬 감동을 결코 잊을 수 없습니다."
+            )
+            kw = "태극기"
+        elif any(w in q for w in ["아우내", "장터", "3·1", "만세", "시위", "천안", "매봉산", "봉화", "군중"]):
+            text = (
+                "1919년 4월 1일 아우내 장터 만세 운동은 거사 전날 매봉산에 봉화를 올려 인근 24개 동리에 뜻을 알리며 시작되었어요. "
+                "장날 정오 3천여 명의 군중이 함께 모여 조국의 자주독립을 목놓아 외쳤던 거룩한 날이었답니다. "
+                "총칼 앞에서도 물러서지 않았던 민중의 용기가 역사의 물줄기를 바꾸었습니다."
+            )
+            kw = "탑골공원"
+        elif any(w in q for w in ["서대문형무소", "감옥", "형무소", "옥중", "고문", "수의", "여옥사", "순국", "벽돌", "방"]):
             text = (
                 "서대문형무소 여옥사에 수감되었을 때 입었던 붉은색 수의와 차가운 시멘트 감방의 기억은 지금도 생생해요. "
                 "일제는 모진 고문과 탄압으로 우리의 입을 막으려 했지만, 1920년 3월 1일 옥중에서도 동지들과 함께 감옥이 울리도록 만세를 불렀습니다. "
-                "육신은 차가운 감옥에 갇혔을지언정, 조국의 자유와 독립을 향한 우리의 영혼은 결코 꺾을 수 없었답니다."
+                "육신은 가둘 수 있을지언정, 조국의 자유와 독립을 향한 영혼은 결코 꺾을 수 없었답니다."
             )
             kw = "서대문형무소"
-        elif any(w in q for w in ["꺾이지 않는", "마음", "정신", "동포", "단결", "용기"]):
+        elif any(w in q for w in ["가족", "부모", "아버지", "어머니", "유중권", "이소제", "오빠", "동생"]):
+            text = (
+                "아우내 장터 만세 시위 현장에서 저의 아버지 유중권 님과 어머니 이소제 님께서 일제 헌병의 흉탄에 순국하셨어요. "
+                "혈육을 잃은 슬픔은 가슴이 찢어지듯 아팠지만, 부모님의 거룩한 희생이 헛되지 않도록 끝까지 조국의 독립을 향한 걸음을 멈추지 않았습니다."
+            )
+            kw = "유관순"
+        elif any(w in q for w in ["정신", "교훈", "마음", "청소년", "학생", "용기", "희망", "단결", "꺾이지"]):
             text = (
                 "독립운동에서 가장 큰 힘이 되었던 것은 바로 이름 모를 수많은 동포들의 '꺾이지 않는 마음'이었어요. "
-                "아우내 장터에서 만세를 외치던 농민, 태극기를 숨겨 품고 달리던 학생, 총칼 앞에서도 물러서지 않았던 평범한 민중들의 순수한 용기가 "
-                "어두운 시대를 밝히는 가장 뜨거운 불꽃이 되었습니다. 포기하지 않고 함께 손을 맞잡는 연대야말로 조국을 지켜낸 진짜 힘이랍니다."
+                "포기하지 않고 함께 손을 맞잡는 연대야말로 어두운 시대를 밝히는 가장 뜨거운 불꽃입니다. "
+                "오늘날 여러분도 불의에 타협하지 않고 정의와 배려를 실천하는 따뜻한 사람이 되어주세요."
             )
             kw = "3·1 운동"
-        elif any(w in q for w in ["태극기", "만들", "배포"]):
-            text = (
-                "휴교령이 내려진 후 고향 천안으로 내려가 동포들의 손에 쥐여줄 태극기를 한 땀 한 땀 직접 그렸어요. "
-                "밤을 새워 만든 태극기가 장터에 펄럭이던 그 날의 벅찬 감동을 결코 잊을 수 없습니다."
-            )
-            kw = "태극기"
         else:
             text = (
-                f"저는 조국의 자주독립을 위해 아우내 장터에서 만세를 외쳤던 유관순입니다. {char_data['fact']} "
-                f"우리가 마주한 시대의 어려움 앞에서도 결코 꺾이지 않고 정의와 자유를 향해 함께 나아갔으면 해요."
+                "저는 조국의 자주독립을 위해 아우내 장터에서 만세를 외쳤던 유관순입니다. "
+                "일제의 가혹한 억압 속에서도 우리가 결코 굴하지 않았던 것은 정의와 자유를 향한 순수한 마음 때문이었어요. "
+                "3·1 만세 운동과 조국의 독립 역사에 대해 무엇이든 더 들려드릴게요."
             )
-            kw = "탑골공원"
+            kw = "유관순"
 
     elif char_name == "안중근":
         if is_out_of_scope:
@@ -748,32 +774,59 @@ def generate_contextual_persona_fallback(char_name, question, char_data):
                 "잡담에 마음을 쓰기보다 오늘의 역사를 돌아보고 조국과 평화의 참뜻을 깊이 헤아려 보시오."
             )
             kw = "없음"
-        elif any(w in q for w in ["기념관", "하얼빈", "사진", "현장", "의거", "이토"]):
+        elif any(w in q for w in ["어릴", "어린", "유년", "무예", "사격", "총", "사냥", "응칠", "성격"]):
             text = (
-                "1909년 10월 26일 아침, 하얼빈 역 플랫홈에 울려 퍼진 세 발의 총성은 침략의 원흉 이토 히로부미를 단죄한 역사적 순간이었소. "
-                "당시 거사 직후 본관은 러시아어로 '코레아 우라(대한독립 만세)'를 외치며 당당히 체포되었소. "
-                "오늘날 하얼빈 역 의거 현장에는 역사의 교훈을 기리는 안중근의사기념관이 세워져 동양 평화의 진정한 가치를 후대에 전하고 있소."
+                "본관의 아명은 가슴과 배에 일곱 개의 점이 있어 응칠(應七)이라 불렸소. "
+                "어린 시절에는 서당에서 글을 배우면서도 말타기와 활쏘기, 사냥을 즐기며 호연지기를 길렀소. "
+                "이때 익힌 명사수로서의 사격 솜씨와 담대함은 훗날 조국을 침략한 원흉을 하얼빈에서 정확히 단죄하는 중요한 밑거름이 되었소."
             )
-            kw = "하얼빈역"
-        elif any(w in q for w in ["꺾이지 않는", "마음", "정신", "동포", "단결", "동의단지"]):
+            kw = "안중근"
+        elif any(w in q for w in ["학교", "교육", "삼흥", "돈의", "계몽", "국채보상", "선생", "가르치"]):
             text = (
-                "조국의 국권을 되찾는 길에서 가장 숭고한 힘은 바로 동포들의 '꺾이지 않는 충의와 단결된 정신'이었소. "
-                "본관이 11명의 동지들과 왼손 넷째 손가락을 자르고 피로써 태극기에 '대한독립'을 맹세했던 단지동맹의 결의 역시 그 마음에서 비롯되었소. "
-                "대의를 위해 자신의 안위를 던지고 대동단결하는 민족의 기개가 있었기에 침략의 어둠 속에서도 희망의 불씨를 지필 수 있었던 것이오."
+                "나라를 지키려면 무엇보다 백성을 깨우치고 유능한 인재를 양성해야 한다고 믿었소. "
+                "그리하여 사재를 털어 남포에 삼흥학교(三興學校)를 설립하고 돈의학교를 인수하여 교육 구국 운동에 헌신하였으며, 국채보상운동에도 앞장섰소. "
+                "참된 배움이야말로 국권 수호의 기초요."
+            )
+            kw = "안중근"
+        elif any(w in q for w in ["단지동맹", "손가락", "절단", "연해주", "동의회", "의병", "피", "맹세", "동포", "결의"]):
+            text = (
+                "1909년 봄 연해주에서 11명의 우국지사들과 함께 왼손 넷째 손가락 첫마디를 자르고 피로써 태극기 위에 '대한독립' 네 글자를 새겼소. "
+                "조국의 독립과 동양 평화를 위해 목숨을 바치겠다는 죽음을 넘어선 맹세였으며, 대의를 위해 대동단결하는 민족의 기개가 그 피에 서려 있었소."
             )
             kw = "단지동맹"
-        elif any(w in q for w in ["평화론", "동양평화론", "사상"]):
+        elif any(w in q for w in ["하얼빈", "이토", "처단", "의거", "총성", "코레아 우라", "브라우닝", "기념관", "현장"]):
             text = (
-                "뤼순 옥중에서 저술한 《동양평화론》의 핵심은 한·중·일 동양 3국이 상호 자주권을 대등하게 존중하며 공동의 평화를 도모하는 것이었소. "
-                "침략과 군국주의를 버리고 참된 화합을 이룰 때 진정한 평화가 열린다는 뜻을 전하고자 하였소."
-            )
-            kw = "동양평화론"
-        else:
-            text = (
-                f"본관은 대한국 의군 참모중장 안중근이오. {char_data['fact']} "
-                f"조국의 독립과 동양 3국의 온전한 평화를 위해 끝까지 굴하지 않고 나아가야 하오."
+                "1909년 10월 26일 아침, 하얼빈 역 플랫홈에 울려 퍼진 세 발의 총성은 침략의 원흉 이토 히로부미의 15가지 죄상을 준엄하게 단죄한 순간이었소. "
+                "거사 직후 본관은 러시아어로 '코레아 우라(대한독립 만세)'를 외치며 당당히 체포되었소. "
+                "이는 개인적 살상이 아니라 대한국 의군 참모중장으로서 교전 단체의 자격으로 감행한 정의의 심판이었소."
             )
             kw = "하얼빈역"
+        elif any(w in q for w in ["어머니", "조마리아", "편지", "수의", "가족", "아내", "아들", "효도"]):
+            text = (
+                "뤼순 옥중에 갇혔을 때, 어머니 조마리아 여사께서는 '네가 만약 늙은 어미보다 먼저 죽는 것을 불효라 생각한다면 어미는 웃음거리가 될 것이다. "
+                "너의 죽음은 한 사람의 것이 아니라 조선인 전체의 공분을 짊어진 것이다. 대의에 죽는 것이 어미에 대한 효도다'라는 편지와 함께 손수 지으신 명주 수의를 보내오셨소. "
+                "어머니의 그 위대한 절개와 당부가 본관의 마음에 영원한 등불이 되었소."
+            )
+            kw = "안중근"
+        elif any(w in q for w in ["동양평화론", "사상", "평화", "저서", "책", "글", "뤼순"]):
+            text = (
+                "뤼순 감옥 옥중에서 저술한 《동양평화론》의 핵심은 한·중·일 세 나라가 서로의 자주권을 철저히 존중하고 평등하게 연대하여 외세의 침략을 막고 항구적인 공동 평화를 이루자는 것이었소. "
+                "침략과 군국주의를 버리고 참된 화합을 이룰 때 비로소 인류의 번영이 열리는 법이오."
+            )
+            kw = "동양평화론"
+        elif any(w in q for w in ["재판", "감옥", "뤼순", "순국", "유언", "사형", "법정"]):
+            text = (
+                "일제의 불법 법정 앞에서도 본관은 결코 목숨을 구걸하지 않고, 이토가 저지른 명성황후 시해와 을사늑약 체결 등 15대 죄악을 낱낱이 꾸짖었소. "
+                "1910년 3월 26일 순국하는 순간까지 조국의 국권 회복과 동양 평화의 실현만을 간절히 염원하였소."
+            )
+            kw = "안중근"
+        else:
+            text = (
+                "본관은 대한국 의군 참모중장 안중근이오. "
+                "조국의 주권을 지키고 동양 3국의 온전한 평화를 세우는 것은 우리 모두의 소명이자 정의의 길이었소. "
+                "조국의 역사와 독립의 험난한 여정에 대해 무엇이든 허심탄회하게 물어보시오."
+            )
+            kw = "안중근"
 
     elif char_name == "윤봉길":
         if is_out_of_scope:
@@ -782,38 +835,71 @@ def generate_contextual_persona_fallback(char_name, question, char_data):
                 "청년들이여, 헛된 잡담에 귀중한 시간을 쏟기보다 불타는 애국심과 실천적 용기로 역사의 부름에 응답합시다!"
             )
             kw = "없음"
-        elif any(w in q for w in ["사진", "모형", "형태", "실제", "모습", "도시락", "물통", "폭탄"]):
+        elif any(w in q for w in ["야학", "계몽", "농촌", "농민독본", "월진회", "부흥", "가르치", "학교", "어릴", "청년"]):
             text = (
-                "1932년 4월 29일 상하이 훙커우 공원 거사에서 사용된 것은 겉보기에 일반적인 물통과 도시락 모양으로 위장된 특수 폭탄이었습니다! "
-                "일제 수뇌부를 처단하기 위해 단상으로 힘차게 던진 것은 가죽 끈이 달린 투척용 물통 폭탄이었으며, "
-                "자결용으로 준비했던 도시락 폭탄은 거사 직후 현장에서 압수되었습니다. 오늘날 그 실제 모형과 역사적 사료는 매헌윤봉길의사기념관에 보존되어 그날의 뜨거운 결의를 증언하고 있습니다."
+                "19세 때 고향 예산에서 농촌 청년들을 깨우치기 위해 야학당을 열어 한글과 민족의식을 가르쳤습니다. "
+                "또한 농민들의 자립과 단결을 위해 3권으로 이루어진 《농민독본》을 직접 저술하고 월진회(月進會)를 조직해 농촌 부흥 운동에 청춘을 바쳤습니다. "
+                "백성이 깨어나야 나라가 산다는 신념이었습니다!"
             )
             kw = "매헌윤봉길의사기념관"
-        elif any(w in q for w in ["꺾이지 않는", "마음", "정신", "청년", "동포", "용기"]):
+        elif any(w in q for w in ["김구", "상하이", "망명", "한인애국단", "임시정부", "만남", "결사", "장부"]):
             text = (
-                "암흑기 속에서도 우리 민족을 다시 일으켜 세운 것은 포기를 모르는 '동포들의 불타는 애국심과 꺾이지 않는 투혼'이었습니다! "
-                "한인애국단의 결사와 농촌 계몽 운동의 현장에서 목격한 청년들의 결연한 눈빛이야말로 조국의 희망이었습니다. "
-                "피와 뼈가 있다면 불의에 타협하지 않고 용감하게 전진할 때 반드시 자유의 새벽이 올 것입니다!"
+                "'장부가 집을 나가 뜻을 이루기 전에는 살아서 돌아오지 않는다(장부출가생불환)'라는 비장한 글을 남기고 중국 상하이로 망명했습니다. "
+                "그곳에서 백범 김구 선생님을 만나 임시정부의 침체를 깨뜨리고 민족의 자주독립 의지를 세계에 떨치고자 한인애국단의 일원으로서 목숨을 건 거사를 결의했습니다!"
+            )
+            kw = "매헌윤봉길의사기념관"
+        elif any(w in q for w in ["홍커우", "훙커우", "공원", "폭탄", "도시락", "물통", "거사", "단상", "시라카와"]):
+            text = (
+                "1932년 4월 29일 상하이 훙커우 공원 거사 당일, 침략의 주범인 일제 군관 수뇌부를 처단하기 위해 투척용 물통 폭탄을 단상으로 던졌으며, "
+                "거사 직후 일제의 굴욕적인 체포를 피하고 민족의 자존을 지키기 위해 자결용 도시락 폭탄을 품에 품고 있었습니다. "
+                "그날의 폭음은 침체되었던 임시정부와 한국 독립운동에 다시 불을 붙였습니다!"
             )
             kw = "루쉰공원"
+        elif any(w in q for w in ["유언", "아들", "모순", "담", "편지", "가족", "아내"]):
+            text = (
+                "떠나기 전 사랑하는 모순과 담 두 아들에게 '너희에게 피와 뼈가 있다면 반드시 조선을 위해 용감한 투사가 되어라'라는 유언시를 남겼습니다. "
+                "아버지로서 아들들의 곁을 지켜주지 못하는 슬픔은 컸지만, 조국의 자유와 후손들의 찬란한 미래를 위해 기꺼이 목숨을 바치는 것이 청년의 참된 도리라 믿었습니다!"
+            )
+            kw = "매헌윤봉길의사기념관"
+        elif any(w in q for w in ["순국", "가나자와", "사형", "십자가", "형틀", "최후", "마지막"]):
+            text = (
+                "거사 후 일본으로 압송되어 1932년 12월 19일 가나자와 육군 공병작업장에서 25세의 나이로 십자가 형틀에 묶여 총살형을 당했습니다. "
+                "그러나 숨이 끊어지는 마지막 순간까지 일제의 불의에 결코 고개 숙이지 않고 당당한 눈빛으로 조국의 영원한 독립을 응시했습니다!"
+            )
+            kw = "윤봉길"
+        elif any(w in q for w in ["청년", "정신", "실천", "용기", "열정", "메시지", "꺾이지"]):
+            text = (
+                "청년의 피가 끓는 한 우리 민족은 결코 죽지 않습니다! "
+                "책상 앞의 공리공론보다 불의에 맞서 행동하는 용기야말로 역사를 바꾸는 진정한 힘입니다. "
+                "오늘을 살아가는 청년 여러분도 시대를 이끄는 정의로운 주역이 되어 당당히 전진하십시오!"
+            )
+            kw = "윤봉길"
         else:
             text = (
-                f"청년 윤봉길입니다! {char_data['fact']} "
-                f"조국의 자주와 번영을 위해 청년들이 앞장서서 실천하고 정의를 지켜냅시다!"
+                "매헌 윤봉길입니다! 청년의 열정과 행동하는 양심이 있을 때 빼앗긴 나라를 되찾고 민족의 존엄을 바로 세울 수 있습니다. "
+                "그날의 상하이 의거와 청년 독립운동에 대해 어떤 점을 함께 나누고 싶으십니까?"
             )
             kw = "윤봉길"
 
-    return text, kw
+    return text, kw, False, is_out_of_scope
 
 
 def get_persona_answer_with_keyword(char_name, user_question, char_data):
     """
     LLM 답변을 생성하며, 대화 맥락에서 우측 패널에 띄울 '가장 핵심적인 시각 자료 검색어(명사 1개)'를 분리 추출.
     외부 API 장애 시에도 지능형 아카이브 폴백(Graceful Degradation)을 가동하여 무중단 서비스 제공.
-    반환: (clean_response_text, extracted_keyword)
+    반환: (clean_response_text, extracted_keyword, is_llm: bool, is_out_of_scope: bool)
     """
     api_keys = get_gemini_api_keys()
     
+    # 범위 외(Out-of-Scope) 질문 여부 사전 스크리닝
+    out_of_scope_keywords = [
+        "날씨", "비 오", "눈 오", "기온", "점심", "저녁", "아침", "메뉴", "밥", "식사", "배고파", "맛집", "국밥",
+        "코딩", "파이썬", "자바", "프로그래밍", "코드", "버그", "주식", "코인", "비트코인",
+        "아이돌", "연예인", "노래", "영화", "드라마", "게임", "축구", "야구"
+    ]
+    is_out_pre = any(w in user_question.lower() for w in out_of_scope_keywords)
+
     # 1. API 키가 전혀 없는 경우 즉시 지능형 아카이브 폴백 가동
     if not api_keys:
         return generate_contextual_persona_fallback(char_name, user_question, char_data)
@@ -884,7 +970,8 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
                     else:
                         clean_text = raw_text.strip()
 
-                    return clean_text, target_kw
+                    is_out_scope = is_out_pre or (target_kw == "없음")
+                    return clean_text, target_kw, True, is_out_scope
             except Exception as e:
                 err_str = str(e)
                 last_error = err_str
@@ -898,8 +985,7 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
 
     # 외부 API가 모두 실패(키 오류, 쿼터 소진, 네트워크 타임아웃)하더라도 앱이 크래시되지 않도록
     # 지능형 역사 아카이브 폴백을 즉각 가동하여 100% 무중단 응답 보장
-    fallback_text, fallback_kw = generate_contextual_persona_fallback(char_name, user_question, char_data)
-    return fallback_text, fallback_kw
+    return generate_contextual_persona_fallback(char_name, user_question, char_data)
 
 # [5. 대화 세션 및 UI 렌더링 동기화]
 if "messages" not in st.session_state:
@@ -914,9 +1000,14 @@ for message in st.session_state.messages:
                 '<div style="margin: 6px 0;"><span style="background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">⚡ 초고속 즉시 답변 (캐시 적용됨)</span></div>',
                 unsafe_allow_html=True
             )
-        elif message.get("is_cached") is False:
+        elif message.get("is_saved") is True:
             st.markdown(
                 '<div style="margin: 6px 0;"><span style="background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">🧠 실시간 AI 생성 완료 (DB 저장됨)</span></div>',
+                unsafe_allow_html=True
+            )
+        elif message.get("role") == "assistant":
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 500;">📜 역사 사료 아카이브 응답</span></div>',
                 unsafe_allow_html=True
             )
         if message.get("image_info"):
@@ -967,12 +1058,16 @@ if active_prompt:
             else:
                 is_cached = False
                 st.write("1️⃣ **[Cache MISS]** 외부 LLM API(Gemini) 호출 및 페르소나 답변 생성 중...")
-                response_text, target_keyword = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
+                response_text, target_keyword, is_llm, is_out_of_scope = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
                 
-                # 에러성 메시지가 아닌 정상 답변인 경우 DB 캐시에 영속화
-                if response_text and not response_text.startswith(f"[{char_name}의 답변] :"):
-                    save_cached_qa(char_name, active_prompt, response_text, target_keyword)
-                    st.write("💾 신규 문답 쌍을 Q&A 캐시 DB에 안전하게 저장했습니다.")
+                # [핵심 가드레일] 오직 실제 Gemini LLM이 성공적으로 추론한 정상 답변만 DB 캐시에 저장 (임시 폴백 및 Out-of-Scope 제외)
+                if is_llm and not is_out_of_scope:
+                    is_saved = save_cached_qa(char_name, active_prompt, response_text, target_keyword, is_llm=True, is_out_of_scope=False)
+                    if is_saved:
+                        st.write("💾 신규 고품질 문답 쌍을 Q&A 캐시 DB에 안전하게 저장했습니다.")
+                else:
+                    is_saved = False
+                    st.write("ℹ️ 안전한 사료 기반 아카이브 응답 모드로 처리되었습니다. (캐시 무결성을 위해 저장은 생략됩니다)")
             
             st.write("2️⃣ 답변 맥락 기반 공인 역사 사료(Wikimedia) 탐색 중...")
             wiki_image = search_wikimedia_image_strict(target_keyword) if target_keyword else None
@@ -1002,15 +1097,21 @@ if active_prompt:
                 unsafe_allow_html=True
             )
             st.toast("⚡ 초고속 캐시 적중! 외부 API 호출 없이 로컬 DB에서 즉시 답변을 반환했습니다.", icon="⚡")
-        else:
+        elif is_saved:
             st.markdown(
                 '<div style="margin: 6px 0;"><span style="background-color: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;">🧠 실시간 AI 생성 완료 (DB 저장됨)</span></div>',
                 unsafe_allow_html=True
             )
             st.toast("🧠 실시간 AI 생성 완료! 새로운 질문-답변이 캐시 DB에 저장되었습니다.", icon="🧠")
+        else:
+            st.markdown(
+                '<div style="margin: 6px 0;"><span style="background-color: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 500;">📜 역사 사료 아카이브 응답</span></div>',
+                unsafe_allow_html=True
+            )
+            st.toast("📜 역사 사료 기반의 안정적인 페르소나 응답이 생성되었습니다.", icon="📜")
 
         # 사료 이미지 또는 폴백 렌더링
-        msg_record = {"role": "assistant", "content": full_response, "is_cached": is_cached}
+        msg_record = {"role": "assistant", "content": full_response, "is_cached": is_cached, "is_saved": is_saved}
         if wiki_image:
             st.image(
                 wiki_image["image_url"],
