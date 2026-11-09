@@ -768,12 +768,25 @@ HISTORICAL_KNOWLEDGE_CORPUS = {
                 "'내 손톱이 빠져나가고 내 귀와 코가 잘려도 나라를 잃은 고통만은 견딜 수 없다'는 마음으로 조국을 품었습니다. 여러분도 정의와 연대의 가치를 마음에 새겨주세요."
             ),
             "keyword": "3·1 운동"
+        },
+        {
+            "id": "location_and_sites",
+            "topic": "아우내 장터 및 서대문형무소 위치와 현재 모습",
+            "is_location": True,
+            "primary": ["어디", "위치", "장소", "현재", "오늘날", "주소", "찾아가", "기념관", "아우내", "병천", "매봉산", "봉화탑", "서대문형무소", "독립문", "현저동", "천안"],
+            "secondary": ["순대", "유적지", "생가", "사당", "탑골공원", "서울", "충남"],
+            "answer": (
+                "1919년 3·1 만세 운동이 거세게 일어났던 아우내 장터는 충청남도 천안시 동남구 병천면에 위치해 있으며, 인근에 유관순열사기념관과 생가지, 그리고 봉화를 올렸던 매봉산 봉화탑이 역사 유적으로 잘 보존되어 있어요. "
+                "또한 마지막까지 옥중 투쟁을 이어갔던 서대문형무소는 서울특별시 서대문구 현저동(독립문 인근)에 '서대문형무소역사관'으로 원형 보존되어 조국의 자유와 독립의 소중함을 오늘날에도 생생히 증언하고 있답니다."
+            ),
+            "keyword": "서대문형무소"
         }
     ],
     "안중근": [
         {
             "id": "weapon_and_harbin",
             "topic": "하얼빈 의거 및 사용 무기/권총",
+            "is_weapon": True,
             "primary": ["무기", "권총", "총", "총기", "브라우닝", "fn", "총번", "262336", "탄환", "총알", "총성", "발사", "십자", "덤덤탄", "의거", "거사", "하얼빈", "이토", "히로부미", "처단", "저격", "암살", "플랫홈", "코레아 우라", "만세", "10월 26일"],
             "secondary": ["장전", "격발", "저격총", "방아쇠", "단죄", "심판", "역사적"],
             "answer": (
@@ -865,12 +878,25 @@ HISTORICAL_KNOWLEDGE_CORPUS = {
                 "대한독립의 소리가 천국에 들려오면 본관은 마땅히 춤을 추며 만세를 부를 것이오."
             ),
             "keyword": "안중근"
+        },
+        {
+            "id": "location_and_sites",
+            "topic": "하얼빈 역 및 뤼순 감옥 위치와 현재 모습",
+            "is_location": True,
+            "primary": ["어디", "위치", "장소", "현재", "오늘날", "주소", "찾아가", "하얼빈역", "하얼빈", "뤼순", "여순", "감옥", "플랫폼", "기념관", "중국", "헤이룽장", "다롄"],
+            "secondary": ["흑룡강", "대련", "역사", "유적지", "표지석", "1번"],
+            "answer": (
+                "침략의 원흉을 단죄했던 거사 현장인 하얼빈 역은 중국 헤이룽장성(흑룡강성) 하얼빈시에 위치해 있소. 현재 하얼빈 역 1번 플랫폼 의거 현장 바닥에는 기념 표지석이 새겨져 있고, 역내에는 '안중근의사기념관'이 조성되어 역사의 교훈을 기리고 있소. "
+                "또한 본관이 수감되어 재판을 받고 순국했던 뤼순 감옥(여순일목감옥)은 랴오닝성 다롄시 뤼순구에 온전히 보존되어 동양 평화의 숭고한 가치를 후대에 전하고 있소."
+            ),
+            "keyword": "하얼빈역"
         }
     ],
     "윤봉길": [
         {
             "id": "bomb_and_hongkou",
             "topic": "훙커우 공원 거사 및 폭탄(물통, 도시락, 무기)",
+            "is_weapon": True,
             "primary": ["무기", "폭탄", "도시락", "물통", "도시락폭탄", "물통폭탄", "형태", "모양", "종류", "거사", "훙커우", "홍커우", "공원", "루쉰공원", "상하이", "상해", "4월 29일", "천장절", "시라카와", "노무라", "단상", "투척"],
             "secondary": ["위장", "자결", "도쿄", "작렬", "파편", "수뇌부", "처단"],
             "answer": (
@@ -941,6 +967,18 @@ HISTORICAL_KNOWLEDGE_CORPUS = {
                 "오늘을 살아가는 청년 여러분도 시대의 부름에 응답하는 정의로운 주역이 되어 당당히 전진하십시오!"
             ),
             "keyword": "윤봉길"
+        },
+        {
+            "id": "location_and_sites",
+            "topic": "상하이 훙커우 공원 위치 및 현재 모습(루쉰공원, 매헌정)",
+            "is_location": True,
+            "primary": ["어디", "위치", "장소", "현재", "오늘날", "주소", "찾아가", "훙커우", "홍커우", "공원", "루쉰", "루쉰공원", "상하이", "상해", "매헌정", "기념관", "기념비"],
+            "secondary": ["중국", "정자", "2층", "공원안", "사천북로", "유적지"],
+            "answer": (
+                "1932년 4월 29일 거사가 일어났던 상하이 훙커우(虹口) 공원은 중국 상하이시 홍커우구에 위치해 있으며, 오늘날에는 중국의 대문호 루쉰을 기리는 '루쉰 공원(魯迅公園)'으로 이름이 바뀌어 보존되고 있습니다! "
+                "공원 안쪽에는 본관의 호(매헌)를 딴 2층 기념 정자인 '매헌정(梅軒亭)'과 거사 현장 기념비가 조성되어 있어, 오늘날에도 수많은 동포들과 청년들이 찾아와 그날의 뜨거운 결의와 독립 의지를 되새기고 있습니다."
+            ),
+            "keyword": "루쉰공원"
         }
     ]
 }
@@ -949,19 +987,39 @@ HISTORICAL_KNOWLEDGE_CORPUS = {
 def retrieve_historical_persona_knowledge(char_name: str, question: str):
     """
     사료 기반 지능형 정보 검색(IR) 엔진:
-    질문의 핵심 명사와 형태소 토큰을 정밀 분석하여, 인물별 사료 코퍼스(Corpus)에서
-    가장 높은 가중치 점수를 획득한 정밀 지식 청크를 동적으로 추출합니다.
+    질문의 핵심 명사와 형태소 토큰을 정밀 분석하고, 의문사 의도(장소/위치 vs 무기/폭탄 등)를
+    게이트 필터링하여 인물별 사료 코퍼스(Corpus)에서 최적의 지식 청크를 동적으로 추출합니다.
     반환: (answer_text, target_keyword, matched: bool)
     """
     corpus = HISTORICAL_KNOWLEDGE_CORPUS.get(char_name, [])
     tokens = extract_keywords(question)
     q_lower = question.lower()
 
+    # 의도 분별 키워드군
+    location_intents = ["어디", "위치", "장소", "현재", "오늘날", "어느 곳", "주소", "찾아가", "자리", "어느곳"]
+    weapon_intents = ["무기", "폭탄", "도시락", "물통", "총", "권총", "총기", "탄환", "총알", "덤덤탄", "칼", "장전", "투척", "단상으로", "장비", "사용하셨나요", "사용했"]
+
+    has_location_intent = any(w in q_lower for w in location_intents)
+    has_weapon_intent = any(w in q_lower for w in weapon_intents)
+
     best_chunk = None
     best_score = 0.0
 
     for chunk in corpus:
+        # [게이트 필터 1] 무기 질문이 아닌데 무기 청크로 오매칭되는 현상 원천 차단
+        if chunk.get("is_weapon") and not has_weapon_intent:
+            continue
+
+        # [게이트 필터 2] 장소/위치 질문인데 무기 청크가 선택되는 현상 차단
+        if has_location_intent and chunk.get("is_weapon"):
+            continue
+
         score = 0.0
+
+        # [장소 의도 가중치 보너스]
+        if has_location_intent and chunk.get("is_location"):
+            score += 8.0
+
         # 1. Primary keywords (가중치 3.0점)
         for p in chunk.get("primary", []):
             if p in q_lower:
@@ -986,7 +1044,7 @@ def retrieve_historical_persona_knowledge(char_name: str, question: str):
             best_score = score
             best_chunk = chunk
 
-    # 매칭 임계치: 핵심 키워드 1개 이상(score >= 2.5) 매칭 시 해당 지식 청크 반환
+    # 매칭 임계치: 유의미한 키워드 매칭(score >= 2.5) 시 해당 지식 청크 반환
     if best_chunk and best_score >= 2.5:
         return best_chunk["answer"], best_chunk["keyword"], True
 
