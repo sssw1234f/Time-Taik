@@ -1223,6 +1223,7 @@ if active_prompt:
             # 1. Cache Check: DB에 동일/유사 질의가 이미 존재하는지 먼저 조회
             st.write("🔍 Q&A 캐시 데이터베이스 조회 중...")
             cached_res = get_cached_qa(char_name, active_prompt)
+            is_saved = False
             
             if cached_res:
                 response_text, target_keyword, hit_count, match_type = cached_res
