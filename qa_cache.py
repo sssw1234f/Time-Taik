@@ -12,8 +12,28 @@ import re
 DB_PATH = os.path.join(os.path.dirname(__file__), "qa_cache.db")
 
 # 한국어 조사 및 용언 어미 분리 정규식
-JOSA_PATTERN = re.compile(r'(?:에서|에게|으로|로|이랑|보다|까지|부터|이나|나|은|는|이|가|을|를|의|에|와|과|도)$')
-VERB_STEM_PATTERN = re.compile(r'(?:이셨나요|이셨|이신|셨나요|셨|시|냐|하신|하셨|했|하|할|한|되|된|될|보는|볼|보|받은|당한)?$')
+JOSA_PATTERN = re.compile(r'(?:에서|에게|으로|로|이랑|보다|까지|부터|이나|나|은|는|이|가|을|를|의|에|와|과|도|마저|조차)?$')
+VERB_STEM_PATTERN = re.compile(
+    r'(?:이었나요|였나요|이셨나요|이셨습니까|이셨|이신|셨나요|셨습니까|셨|시|냐|하신|하셨|했|하|할|한|되|된|될|보는|볼|보|받은|당한|인가요|인가|인지|인지요|일까요|입니까|입니까요|였습니까|였을까요|어때요|어떠셨나요|어떠했나요)?$'
+)
+
+# 1글자 실질 명사군 (조사가 분리되어도 유지)
+SINGLE_CHAR_NOUNS = {'역', '총', '칼', '책', '집', '배', '길', '뜻', '피', '뼈', '돈', '법', '날'}
+
+# 복합명사 정규화 및 분해 사전
+COMPOUND_WORDS = {
+    "물통폭탄": ["물통", "폭탄"],
+    "도시락폭탄": ["도시락", "폭탄"],
+    "하얼빈역": ["하얼빈", "역"],
+    "아우내장터": ["아우내", "장터"],
+    "서대문형무소": ["서대문형무소", "형무소"],
+    "동양평화론": ["동양평화론", "평화"],
+    "단지동맹": ["단지동맹", "단지"],
+    "이화학당": ["이화학당", "학당"],
+    "훙커우공원": ["훙커우", "공원"],
+    "홍커우공원": ["홍커우", "공원"],
+    "매봉산봉화": ["매봉산", "봉화"]
+}
 
 # 질문의 의도(Intent)를 완전히 바꾸는 핵심 분별어군
 # 사용자의 질문에 이 단어가 포함되어 있는데 DB 질문에는 없다면, 캐시를 차단하고 실시간 AI/정밀 분기로 전달
@@ -21,15 +41,23 @@ INTENT_DISCRIMINATORS = {
     '사진', '모형', '형태', '실제', '모습', '그림', '유물', '사료', '영상', '자료',
     '누구', '어디', '장소', '위치', '크기', '무게', '원리', '제작자', '재료', '구조',
     '언제', '시간', '사망', '사상자', '피해자', '비용', '돈', '현재',
-    '고문', '몇', '발', '총', '총기', '가족', '나이', '생일', '태어난', '결과',
-    '학교', '공부', '학당', '과목', '선생님', '친구', '어릴', '유년', '무예', '사격',
+    '고문', '몇', '발', '가족', '나이', '생일', '태어난', '결과',
+    '학교', '공부', '과목', '선생님', '친구', '어릴', '유년', '무예', '사격',
     '야학', '농민', '계몽', '음식', '밥', '국밥', '점심', '저녁', '날씨'
 }
 
-# 불필요한 공통 조사/추임새 단어
+# 불필요한 공통 조사/추임새 단어 및 의문형 종결어
 STOPWORDS = {
-    "알려주", "설명해", "말씀해", "들려주", "이야기", "대해", "어떤", "무엇", "궁금", "생각",
-    "각각", "있나요", "있어", "있습니까", "뭐야", "뭔가요", "인가요", "어떠", "어떻"
+    "알려주", "알려줘", "알려주세요", "알려주시겠어요",
+    "설명해", "설명해줘", "설명해주세요",
+    "말씀해", "말씀해줘", "말씀해주세요",
+    "들려주", "들려줘", "들려주세요",
+    "이야기", "대해", "대해서", "관해", "관해서",
+    "어떤", "어떠", "어떻", "어떻게", "어떠한",
+    "무엇", "무엇인가요", "무엇입니까", "무엇이었나요", "뭐야", "뭔가요", "뭐예요",
+    "궁금", "생각", "각각", "있나요", "있어", "있습니까", "인가요", "입니까",
+    "부른", "다른", "다르", "다른가요", "않으신", "멈추지", "하셨나요", "하셨습니까",
+    "계신가요", "계십니까", "시절", "당시", "때", "그때", "관련", "그", "저", "이"
 }
 
 # 표준 9대 정규 프리셋 데이터
@@ -93,13 +121,15 @@ CANONICAL_PRESETS = [
 
 def clean_korean_word(word: str) -> str:
     """한국어 단어에서 조사 및 용언 어미를 제거하여 어근(Stem) 추출"""
-    if len(word) <= 1:
+    if len(word) <= 1 and word not in SINGLE_CHAR_NOUNS:
         return word
     if word.startswith("만들") or word.startswith("만드"):
         return "만들"
     w = JOSA_PATTERN.sub('', word)
     w = VERB_STEM_PATTERN.sub('', w)
-    return w if len(w) >= 2 else word
+    if len(w) >= 2 or w in SINGLE_CHAR_NOUNS:
+        return w
+    return word
 
 
 def normalize_question(question: str) -> str:
@@ -117,7 +147,7 @@ def normalize_question(question: str) -> str:
     
     patterns = [
         r"\s*(?:을|를|은|는|이|가)?\s*(?:에\s*대해\s*|대해\s*)?(?:알려주세요|알려줘요|알려줘|알려주시겠어요|말씀해주세요|말씀해줘|설명해주세요|설명해줘|이야기해주세요|이야기해줘|들려주세요|들려줘)$",
-        r"\s*(?:이었나요|였나요|인가요|인가|인지|인지요|일까요|입니까|입니까요)$",
+        r"\s*(?:이었나요|였나요|인가요|인가|인지|인지요|일까요|입니까|입니까요|였습니까|였을까요|어때요|어떠셨나요|어떠했나요)$",
         r"\s*(?:무엇인가요|무엇인가|무엇입니까|무엇이었나요|뭐예요|뭔가요)$"
     ]
     
@@ -133,14 +163,20 @@ def normalize_question(question: str) -> str:
 
 
 def extract_keywords(text: str) -> set:
-    """텍스트에서 정규화된 핵심 의미 토큰 세트 추출"""
+    """텍스트에서 복합명사 분해 및 정규화된 핵심 의미 토큰 세트 추출"""
     text = re.sub(r"^[^\w가-힣]+", "", text)
     text = re.sub(r"[?!.,~^()]+", " ", text)
+    
+    # 1. 역사 핵심 복합명사 사전 분해 적용 (물통폭탄 -> 물통 폭탄 등)
+    for comp, parts in COMPOUND_WORDS.items():
+        if comp in text:
+            text = text.replace(comp, " ".join(parts))
+            
     words = re.findall(r"[가-힣a-zA-Z0-9]+", text.lower())
     result = set()
     for raw in words:
         w = clean_korean_word(raw)
-        if len(w) >= 2 and w not in STOPWORDS:
+        if (len(w) >= 2 or w in SINGLE_CHAR_NOUNS) and w not in STOPWORDS:
             result.add(w)
     return result
 
@@ -148,13 +184,15 @@ def extract_keywords(text: str) -> set:
 def is_semantic_intent_match(q_user: str, q_db: str) -> tuple:
     """
     의도 인식 기반 정밀 유사도 매칭:
-    - 단순 단어 출현율뿐만 아니라 질문의 차별화 키워드(새로운 명사/의도어) 유무를 철저히 검증
+    - 1차: 공백/기호 제거 후 완전 일치 검사
+    - 2차: 의도 분별어(INTENT_DISCRIMINATORS) 필터링
+    - 3차: 의미 키워드 교집합 및 포괄율(Coverage) 분석
     반환: (is_match: bool, score: float)
     """
-    norm_u = normalize_question(q_user)
-    norm_d = normalize_question(q_db)
-    
-    if norm_u == norm_d:
+    # 1. 공백 및 기호 제거 후 완전 일치 검사
+    clean_u = re.sub(r"[^\w가-힣]", "", q_user.lower())
+    clean_d = re.sub(r"[^\w가-힣]", "", q_db.lower())
+    if clean_u == clean_d and clean_u:
         return True, 1.0
 
     k_user = extract_keywords(q_user)
@@ -166,23 +204,28 @@ def is_semantic_intent_match(q_user: str, q_db: str) -> tuple:
     intersection = k_user & k_db
     diff_user = k_user - k_db
 
-    # 1. 의도 분별 필터: 사용자가 DB에 없는 완전히 새로운 속성/단어를 요구한 경우 즉시 차단
+    # [의도 분별 필터] 사용자가 DB 질문에 없는 완전히 다른 의도 속성(위치, 고문, 날씨, 나이 등)을 요구한 경우 차단
     if diff_user & INTENT_DISCRIMINATORS:
         return False, 0.0
 
-    # 2. 사용자 질문에 DB 질문에 없는 실질 명사가 2개 이상 포함된 경우 다른 질문으로 판단
-    if len(diff_user) >= 2:
-        return False, 0.0
+    jaccard = len(intersection) / len(k_user | k_db) if (k_user | k_db) else 0.0
+    db_coverage = len(intersection) / len(k_db) if k_db else 0.0
+    user_coverage = len(intersection) / len(k_user) if k_user else 0.0
 
-    # 3. 자카드 유사도 및 DB 키워드 포괄율(Coverage) 계산
-    jaccard = len(intersection) / len(k_user | k_db)
-    db_coverage = len(intersection) / len(k_db)
-    
-    # 4. 엄격한 매칭 조건:
-    # Jaccard가 0.60 이상이거나, DB 핵심 키워드의 75% 이상을 포함하면서 사용자 추가 단어가 0개일 때만 안전하게 매칭
-    is_match = (jaccard >= 0.60) or (db_coverage >= 0.75 and len(diff_user) == 0)
+    # 안전하고 유연한 매칭 기준:
+    # 1) 교집합 핵심 단어가 2개 이상이면서 Jaccard >= 0.38
+    # 2) 또는 DB 키워드의 50% 이상, User 키워드의 38% 이상을 공유할 때
+    # 3) 또는 교집합이 3개 이상이면서 사용자 추가 단어가 1개 이하일 때
+    is_match = False
+    if len(intersection) >= 2:
+        if jaccard >= 0.38:
+            is_match = True
+        elif db_coverage >= 0.50 and user_coverage >= 0.38:
+            is_match = True
+        elif len(intersection) >= 3 and len(diff_user) <= 1:
+            is_match = True
+
     score = max(jaccard, db_coverage)
-    
     return is_match, score
 
 
