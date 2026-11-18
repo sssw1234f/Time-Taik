@@ -696,13 +696,72 @@ def search_wikimedia_image_strict(keyword):
     return None
 
 # [4. 사료 기반 지능형 지식 코퍼스(Corpus) 및 IR 검색 엔진]
+# 인물별 고유 시그니처 키워드 (타 인물 오매칭 원천 차단 및 크로스 페르소나 안내용)
+SIGNATURE_KEYWORDS = {
+    "안중근": {
+        "keywords": ["삼흥", "돈의", "하얼빈", "이토", "히로부미", "단지동맹", "동양평화론", "조마리아", "뤼순", "여순", "브라우닝", "응칠", "우덕순", "유동하", "조도선", "최재형"],
+        "title": "안중근 의사",
+        "description": "1909년 10월 하얼빈 역에서 침략의 원흉 이토 히로부미를 처단하고 《동양평화론》을 남기신 독립운동가이자 평화 사상가"
+    },
+    "유관순": {
+        "keywords": ["이화학당", "아우내", "매봉산", "봉화", "유중권", "이소제", "서대문형무소", "여옥사", "유예도", "어윤희", "심명철", "임명애", "태극기를 만들어", "태극기 배포", "태극기 제작"],
+        "title": "유관순 열사",
+        "description": "1919년 아우내 장터 만세 운동을 이끌고 서대문형무소 옥중에서도 조국의 자주독립을 외치신 독립운동가"
+    },
+    "윤봉길": {
+        "keywords": ["훙커우", "홍커우", "물통폭탄", "도시락폭탄", "월진회", "농민독본", "부흥원", "오치서숙", "모순", "가나자와", "시라카와", "노무라", "매헌정", "매헌", "천장절"],
+        "title": "윤봉길 의사",
+        "description": "1932년 상하이 훙커우 공원에서 일제 군관 수뇌부를 처단하여 우리 민족의 불굴의 기개를 세계에 떨친 의열투사"
+    }
+}
+
+def check_cross_persona_inquiry(current_char: str, question: str):
+    """
+    질문이 다른 역사 인물의 고유 활동(시그니처 키워드)에 대한 것인지 판별하고,
+    현재 인물의 시각에서 타 인물의 공적을 정중히 예우하며 해당 인물로 대화를 안내하는 답변을 반환.
+    반환: (answer_text, target_keyword, is_cross: bool)
+    """
+    q_lower = question.lower()
+    
+    for other_char, meta in SIGNATURE_KEYWORDS.items():
+        if other_char == current_char:
+            continue
+        
+        matched_sigs = [kw for kw in meta["keywords"] if kw in q_lower]
+        if matched_sigs:
+            sig_word = matched_sigs[0]
+            if current_char == "유관순":
+                text = (
+                    f"질문해 주신 '{sig_word}'에 관한 이야기는 {meta['title']}의 거룩한 독립운동 발자취예요! "
+                    f"{meta['title']}께서는 {meta['description']}이셨답니다. "
+                    f"저 유관순은 1919년 고향 천안 아우내 장터와 서대문형무소에서 조국의 자주독립을 위해 온몸을 바쳤어요. "
+                    f"{meta['title']}의 숭고한 활약에 대해 더 깊이 알고 싶으시다면, 왼쪽 사이드바 대화 설정에서 '{other_char}' 님을 선택해 대화를 나누어 보아요!"
+                )
+            elif current_char == "안중근":
+                text = (
+                    f"그대가 물어본 '{sig_word}'에 관한 역사적 사실은 {meta['title']}께서 조국을 위해 결행하신 숭고한 구국 활동이오. "
+                    f"{meta['title']}께서는 {meta['description']}이셨소. "
+                    f"본관 안중근은 교육 구국과 의병 투쟁, 그리고 1909년 하얼빈 의거에 청춘을 바쳤소. "
+                    f"{meta['title']}의 고결한 투혼에 대해 더 자세한 이야기를 듣고자 하신다면, 사이드바에서 '{other_char}' 님을 선택하여 물어보시오."
+                )
+            else:  # 윤봉길
+                text = (
+                    f"문의하신 '{sig_word}'에 관한 이야기는 {meta['title']}께서 조국 광복을 위해 온몸을 던지신 위대한 역사적 헌신입니다! "
+                    f"{meta['title']}께서는 {meta['description']}이셨습니다. "
+                    f"저 윤봉길은 청년의 피 끓는 의열 투쟁으로 상하이 훙커우 공원에서 일제 침략자들을 응징했지요. "
+                    f"{meta['title']}의 장엄한 독립 투쟁에 대해 더 뜨거운 이야기를 듣고 싶으시다면, 사이드바 설정에서 '{other_char}' 님을 선택해 주십시오!"
+                )
+            return text, other_char, True
+            
+    return None, None, False
+
 HISTORICAL_KNOWLEDGE_CORPUS = {
     "유관순": [
         {
             "id": "school_life",
             "topic": "학창 시절 및 이화학당",
-            "primary": ["이화학당", "이화", "학당", "학교", "공부", "배움", "과목", "신학문", "프라이", "월터", "정동", "기숙사", "학창", "선생님", "스승", "친구", "동창"],
-            "secondary": ["어릴", "어린", "유년", "수업", "성경", "장학생", "서울"],
+            "primary": ["이화학당", "이화", "학당", "공부", "배움", "과목", "신학문", "프라이", "월터", "정동", "기숙사", "학창", "선생님", "스승", "친구", "동창"],
+            "secondary": ["학교", "어릴", "어린", "유년", "수업", "성경", "장학생", "서울"],
             "answer": (
                 "저는 1916년 충남 천안을 떠나 서울 정동 이화학당 보통과 3학년에 교비 장학생으로 편입하였고, 이후 고등과에 진학해 신학문과 성경을 배웠어요. "
                 "프라이 교장선생님과 월터 선생님의 따뜻한 가르침 속에서 성실히 배우며 빼앗긴 조국의 현실에 깊이 눈뜨게 되었답니다. "
@@ -910,7 +969,7 @@ HISTORICAL_KNOWLEDGE_CORPUS = {
         {
             "id": "kimgu_and_watch",
             "topic": "백범 김구와의 만남, 한인애국단, 회중시계 교환",
-            "primary": ["김구", "백범", "한인애국단", "만남", "회중시계", "시계", "교환", "임시정부", "선서", "태극기앞", "망명", "장부출가생불환", "떠나", "이유", "계기"],
+            "primary": ["김구", "백범", "한인애국단", "만남", "회중시계", "시계", "교환", "임시정부", "선서", "태극기앞", "망명", "장부출가생불환", "떠나", "망명계기", "떠난이유"],
             "secondary": ["상하이", "선서문", "수류탄", "권총", "작별", "6원", "2원"],
             "answer": (
                 "'장부가 집을 나가 뜻을 이루기 전에는 살아 돌아오지 않는다(장부출가생불환)'라는 글을 남기고 상하이로 건너가 백범 김구 선생님을 뵈었습니다. "
@@ -1082,9 +1141,16 @@ def retrieve_historical_persona_knowledge(char_name: str, question: str):
     게이트 필터링하여 인물별 사료 코퍼스(Corpus)에서 최적의 지식 청크를 동적으로 추출합니다.
     반환: (answer_text, target_keyword, matched: bool)
     """
+    q_lower = question.lower()
+
+    # [교차 오매칭 차단 게이트] 타 인물의 고유 시그니처 키워드가 포함된 질문이면 본인 코퍼스 검색 즉시 차단
+    for other_char, meta in SIGNATURE_KEYWORDS.items():
+        if other_char != char_name:
+            if any(sig in q_lower for sig in meta["keywords"]):
+                return None, None, False
+
     corpus = HISTORICAL_KNOWLEDGE_CORPUS.get(char_name, [])
     tokens = extract_keywords(question)
-    q_lower = question.lower()
 
     # 의도 분별 키워드군
     location_intents = ["어디", "위치", "장소", "현재", "오늘날", "어느 곳", "주소", "찾아가", "자리", "어느곳"]
@@ -1145,29 +1211,35 @@ def retrieve_historical_persona_knowledge(char_name: str, question: str):
 def generate_contextual_persona_fallback(char_name, question, char_data):
     """
     외부 LLM API 호출 불가(키 오류, 쿼터 소진, 네트워크 지연) 시에도
-    질문 맥락을 분석하여 역사 사료 기반의 자연스러운 페르소나 답변 및 시각자료를 생성하는 4단계 안전장치:
-    1단계: 사료 기반 지능형 정보 검색(IR) 엔진 (역사 팩트 질문 최우선)
-    2단계: 일상 대화(스몰토크: 인사, 안부, 날씨) 감성 페르소나 화답 및 대화 연결
-    3단계: 완전 무관한 질문(코딩, 주식, 연예 등) 페르소나 유지 정중 거절
-    4단계: 역사 대화 맥락 적응형(Adaptive) 수용 응답
-    반환: (text, kw, is_llm=False, is_out_of_scope: bool)
+    질문 맥락을 분석하여 역사 사료 기반의 자연스러운 페르소나 답변 및 시각자료를 생성하는 5단계 안전장치:
+    1단계: 사료 기반 지능형 정보 검색(IR) 엔진 (본인 역사 팩트 질문 최우선 - 캐시 저장 허용)
+    2단계: 타 인물 고유 활동 질문에 대한 크로스 페르소나(Cross-Persona) 지능형 식별 및 안내
+    3단계: 일상 대화(스몰토크: 인사, 안부, 날씨) 감성 페르소나 화답 및 대화 연결
+    4단계: 완전 무관한 질문(코딩, 주식, 연예 등) 페르소나 유지 정중 거절
+    5단계: 역사 대화 맥락 적응형(Adaptive) 수용 응답
+    반환: (text, kw, is_llm: bool, is_out_of_scope: bool, is_verified_source: bool)
     """
     q = question.lower()
     
     # 1단계. 사료 기반 지능형 정보 검색(IR) 엔진 최우선 가동 (역사 팩트 질문 선별)
     matched_answer, matched_kw, is_matched = retrieve_historical_persona_knowledge(char_name, question)
     if is_matched:
-        return matched_answer, matched_kw, False, False
+        return matched_answer, matched_kw, False, False, True
 
-    # 2단계. 일상 대화(스몰토크: 인사, 안부, 날씨) 유연 감지 및 감동적인 페르소나 화답
+    # 2단계. 타 인물 고유 활동 질문에 대한 크로스 페르소나(Cross-Persona) 지능형 식별 및 안내
+    cross_text, cross_kw, is_cross = check_cross_persona_inquiry(char_name, question)
+    if is_cross:
+        return cross_text, cross_kw, False, True, False
+
+    # 3단계. 일상 대화(스몰토크: 인사, 안부, 날씨) 유연 감지 및 감동적인 페르소나 화답
     char_smalltalk = SMALLTALK_CORPUS.get(char_name, {})
     for category in ["weather", "wellbeing", "greeting"]:
         st_data = char_smalltalk.get(category)
         if st_data:
             if any(kw in q for kw in st_data["keywords"]):
-                return st_data["answer"], st_data["keyword"], False, True
+                return st_data["answer"], st_data["keyword"], False, True, False
 
-    # 3단계. 범위 외(Out-of-Scope) 질문 키워드 감지 (음식, 코딩, 주식, 연예 등)
+    # 4단계. 범위 외(Out-of-Scope) 질문 키워드 감지 (음식, 코딩, 주식, 연예 등)
     pure_out_of_scope_keywords = [
         "점심", "저녁", "아침", "메뉴", "밥", "식사", "배고파", "맛집", "국밥",
         "코딩", "파이썬", "자바", "프로그래밍", "코드", "버그", "주식", "코인", "비트코인",
@@ -1191,9 +1263,9 @@ def generate_contextual_persona_fallback(char_name, question, char_data):
                 "점심 메뉴나 일상의 한가로운 이야기를 나눌 때가 아닙니다! 지금 우리에게 가장 절실한 것은 조국의 독립과 민족의 자주권입니다. "
                 "청년들이여, 헛된 잡담에 귀중한 시간을 쏟기보다 불타는 애국심과 실천적 용기로 역사의 부름에 응답합시다!"
             )
-        return text, "없음", False, True
+        return text, "없음", False, True, False
 
-    # 4단계. 임계치 미달 시 질문 맥락을 지능적으로 수용하는 페르소나 적응형(Adaptive) 응답
+    # 5단계. 임계치 미달 시 질문 맥락을 지능적으로 수용하는 페르소나 적응형(Adaptive) 응답
     if char_name == "유관순":
         text = (
             "질문해 주신 그 시대의 상황과 아픔에 대해 말씀드리자면, 일제의 무자비한 탄압 아래 온 겨레가 크나큰 고통을 겪고 있었어요. "
@@ -1216,7 +1288,7 @@ def generate_contextual_persona_fallback(char_name, question, char_data):
         )
         kw = "윤봉길"
 
-    return text, kw, False, False
+    return text, kw, False, False, False
 
 
 def get_persona_answer_with_keyword(char_name, user_question, char_data):
@@ -1316,7 +1388,7 @@ def get_persona_answer_with_keyword(char_name, user_question, char_data):
                         clean_text = raw_text.strip()
 
                     is_out_scope = is_out_pre or (target_kw == "없음")
-                    return clean_text, target_kw, True, is_out_scope
+                    return clean_text, target_kw, True, is_out_scope, (not is_out_scope)
             except Exception as e:
                 err_str = str(e)
                 last_error = err_str
@@ -1404,10 +1476,10 @@ if active_prompt:
             else:
                 is_cached = False
                 st.write("1️⃣ **[Cache MISS]** 외부 LLM API(Gemini) 호출 및 페르소나 답변 생성 중...")
-                response_text, target_keyword, is_llm, is_out_of_scope = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
+                response_text, target_keyword, is_llm, is_out_of_scope, is_verified_source = get_persona_answer_with_keyword(char_name, active_prompt, char_data)
                 
-                # [핵심 가드레일] 오직 실제 Gemini LLM이 성공적으로 추론한 정상 답변만 DB 캐시에 저장 (임시 폴백 및 Out-of-Scope 제외)
-                if is_llm and not is_out_of_scope:
+                # [핵심 가드레일] 실제 Gemini LLM 추론 정상 답변 또는 공인 사료 IR에서 정밀 검증된 답변만 DB 캐시에 저장
+                if is_verified_source and not is_out_of_scope:
                     is_saved = save_cached_qa(char_name, active_prompt, response_text, target_keyword, is_llm=True, is_out_of_scope=False)
                     if is_saved:
                         st.write("💾 신규 고품질 문답 쌍을 Q&A 캐시 DB에 안전하게 저장했습니다.")
